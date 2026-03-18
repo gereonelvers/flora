@@ -309,8 +309,8 @@ async function handleConnection(ws) {
             console.log('[voice] Tool result sent back to Nova Sonic');
           }
 
-          // Completion end
-          if (evt.completionEnd) {
+          // Completion end — only signal turn_end for final responses, not after tool calls
+          if (evt.completionEnd && evt.completionEnd.stopReason !== 'TOOL_USE') {
             ws.send(JSON.stringify({ type: 'turn_end' }));
           }
         }

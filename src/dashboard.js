@@ -47,9 +47,17 @@ const FLORA_STATES = {
   },
 };
 
+let stateTimeout = null;
 function setFloraState(s) {
   floraState = s;
   updateAvatar();
+  // Safety: never stay stuck in thinking/speaking for more than 30s
+  clearTimeout(stateTimeout);
+  if (s === 'thinking' || s === 'speaking') {
+    stateTimeout = setTimeout(() => {
+      if (floraState === 'thinking' || floraState === 'speaking') setFloraState('idle');
+    }, 30000);
+  }
 }
 
 // ── Audio Playback (PCM 24kHz from Nova Sonic) ──────────────────────
