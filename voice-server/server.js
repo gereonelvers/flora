@@ -214,8 +214,13 @@ async function handleConnection(ws) {
 
         // Text → browser (FINAL only, skip interrupted markers)
         if (evt.textOutput && !speculativeContentIds.has(evt.textOutput.contentId)) {
-          // Barge-in: Nova Sonic sends {"interrupted": true} when user interrupts
-          if (evt.textOutput.content === '{"interrupted": true}' || evt.textOutput.content === '{"interrupted":true}') {
+          // Barge-in: Nova Sonic sends interrupted marker when user interrupts
+          let isInterrupted = false;
+          try {
+            const parsed = JSON.parse(evt.textOutput.content);
+            if (parsed.interrupted) isInterrupted = true;
+          } catch {}
+          if (isInterrupted || evt.textOutput.content?.includes('"interrupted"')) {
             console.log('[voice] Barge-in detected, clearing audio');
             ws.send(JSON.stringify({ type: 'interrupted' }));
           } else {
