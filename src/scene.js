@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+
 import { createSeededRandom, fbm2D, ridge2D } from './noise.js';
 
 const SCENE_SEED = 20260318;
@@ -41,16 +41,16 @@ function createTextures(renderer) {
   const seededRandom = createSeededRandom(SCENE_SEED);
 
   const terrainMap = setTextureDefaults(
-    makeCanvasTexture(1024, 1024, (ctx, width, height) => {
+    makeCanvasTexture(512, 512, (ctx, width, height) => {
       const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, '#31130e');
-      gradient.addColorStop(0.28, '#5d2418');
-      gradient.addColorStop(0.62, '#8e3b24');
-      gradient.addColorStop(1, '#c86f3a');
+      gradient.addColorStop(0, '#7a4030');
+      gradient.addColorStop(0.28, '#9a5838');
+      gradient.addColorStop(0.62, '#b57042');
+      gradient.addColorStop(1, '#d49060');
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, width, height);
 
-      for (let i = 0; i < 24000; i += 1) {
+      for (let i = 0; i < 8000; i += 1) {
         const x = seededRandom() * width;
         const y = seededRandom() * height;
         const size = seededRandom() * 5 + 0.35;
@@ -229,14 +229,14 @@ function createTextures(renderer) {
     { repeat: [1, 1] },
   );
 
-  const skyMap = makeCanvasTexture(2048, 1024, (ctx, width, height) => {
+  const skyMap = makeCanvasTexture(1024, 512, (ctx, width, height) => {
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, '#09060d');
-    gradient.addColorStop(0.18, '#201019');
-    gradient.addColorStop(0.42, '#5c281e');
-    gradient.addColorStop(0.68, '#9d472b');
-    gradient.addColorStop(0.9, '#dc8c4f');
-    gradient.addColorStop(1, '#f5c188');
+    gradient.addColorStop(0, '#c4836a');
+    gradient.addColorStop(0.2, '#c8855e');
+    gradient.addColorStop(0.45, '#d49768');
+    gradient.addColorStop(0.7, '#dea872');
+    gradient.addColorStop(0.9, '#e8be88');
+    gradient.addColorStop(1, '#f0d0a0');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
 
@@ -326,35 +326,31 @@ function createTextures(renderer) {
 }
 
 function createLighting(scene) {
-  const hemisphere = new THREE.HemisphereLight(0xf3d3bf, 0x2c140f, 1.02);
+  const hemisphere = new THREE.HemisphereLight(0xffeedd, 0x8b5a3a, 1.8);
   scene.add(hemisphere);
 
-  const sun = new THREE.DirectionalLight(0xffefda, 4.2);
+  const sun = new THREE.DirectionalLight(0xfff4e8, 5.5);
   sun.position.copy(SUN_DIRECTION).multiplyScalar(260);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.mapSize.set(1024, 1024);
   sun.shadow.camera.near = 20;
-  sun.shadow.camera.far = 480;
-  sun.shadow.camera.left = -180;
-  sun.shadow.camera.right = 180;
-  sun.shadow.camera.top = 180;
-  sun.shadow.camera.bottom = -180;
+  sun.shadow.camera.far = 300;
+  sun.shadow.camera.left = -100;
+  sun.shadow.camera.right = 100;
+  sun.shadow.camera.top = 100;
+  sun.shadow.camera.bottom = -100;
   sun.shadow.bias = -0.00012;
   sun.target.position.set(6, 10, -8);
   scene.add(sun);
   scene.add(sun.target);
 
-  const fill = new THREE.DirectionalLight(0xff8758, 0.26);
+  const fill = new THREE.DirectionalLight(0xffb88a, 0.8);
   fill.position.set(170, 40, 120);
   scene.add(fill);
 
-  const coolRim = new THREE.DirectionalLight(0x93d8ff, 0.4);
+  const coolRim = new THREE.DirectionalLight(0xc8e8ff, 0.5);
   coolRim.position.set(-110, 26, 148);
   scene.add(coolRim);
-
-  const bounce = new THREE.PointLight(0xff6a35, 0.35, 180, 2);
-  bounce.position.set(0, 8, 28);
-  scene.add(bounce);
 }
 
 function createMoonMesh(radius, color) {
@@ -387,7 +383,7 @@ function createMoonMesh(radius, color) {
 
 function createAtmosphere(scene, textures, animated) {
   const skySphere = new THREE.Mesh(
-    new THREE.SphereGeometry(720, 64, 32),
+    new THREE.SphereGeometry(720, 32, 16),
     new THREE.MeshBasicMaterial({
       map: textures.skyMap,
       side: THREE.BackSide,
@@ -397,7 +393,7 @@ function createAtmosphere(scene, textures, animated) {
   scene.add(skySphere);
 
   const hazeSphere = new THREE.Mesh(
-    new THREE.SphereGeometry(380, 48, 24),
+    new THREE.SphereGeometry(380, 24, 12),
     new THREE.MeshBasicMaterial({
       color: 0xf28f5e,
       transparent: true,
@@ -427,7 +423,7 @@ function createAtmosphere(scene, textures, animated) {
   scene.add(sunGlow);
 
   const horizonDisc = new THREE.Mesh(
-    new THREE.RingGeometry(180, 330, 96),
+    new THREE.RingGeometry(180, 330, 48),
     new THREE.MeshBasicMaterial({
       color: 0xffa867,
       transparent: true,
@@ -518,9 +514,9 @@ function createRockField(scene, getHeightAt) {
       roughness: 1,
       metalness: 0.01,
     }),
-    300,
+    150,
   );
-  nearRocks.castShadow = true;
+  nearRocks.castShadow = false;
   nearRocks.receiveShadow = true;
 
   const farRocks = new THREE.InstancedMesh(
@@ -532,8 +528,8 @@ function createRockField(scene, getHeightAt) {
     }),
     56,
   );
-  farRocks.castShadow = true;
-  farRocks.receiveShadow = true;
+  farRocks.castShadow = false;
+  farRocks.receiveShadow = false;
 
   const matrix = new THREE.Matrix4();
   const position = new THREE.Vector3();
@@ -541,7 +537,7 @@ function createRockField(scene, getHeightAt) {
   const rotation = new THREE.Euler();
   const scale = new THREE.Vector3();
 
-  for (let index = 0; index < nearRocks.count; index += 1) {
+  for (let index = 0; index < 150; index += 1) {
     let radialDistance = 42 + seededRandom() * 160;
     let angle = seededRandom() * Math.PI * 2;
     if (radialDistance < 75 && Math.abs(angle) < 0.8) {
@@ -595,16 +591,16 @@ function createRockField(scene, getHeightAt) {
 }
 
 function createTerrain(scene, textures) {
-  const geometry = new THREE.PlaneGeometry(460, 460, 320, 320);
+  const geometry = new THREE.PlaneGeometry(460, 460, 160, 160);
   geometry.rotateX(-Math.PI / 2);
 
   const position = geometry.attributes.position;
   const colors = [];
-  const lowColor = new THREE.Color(0x42170f);
-  const midColor = new THREE.Color(0x7f321f);
-  const highColor = new THREE.Color(0xb15e31);
-  const highlight = new THREE.Color(0xe0b47a);
-  const shadowTint = new THREE.Color(0x241013);
+  const lowColor = new THREE.Color(0x8b4a2a);
+  const midColor = new THREE.Color(0xb06838);
+  const highColor = new THREE.Color(0xc88050);
+  const highlight = new THREE.Color(0xe8c89a);
+  const shadowTint = new THREE.Color(0x6b3820);
 
   for (let index = 0; index < position.count; index += 1) {
     const x = position.getX(index);
@@ -650,7 +646,7 @@ function createTerrain(scene, textures) {
 }
 
 function createCliffWall(width, height, depth, seedOffset, material) {
-  const geometry = new THREE.PlaneGeometry(width, height, 96, 18);
+  const geometry = new THREE.PlaneGeometry(width, height, 48, 10);
   const position = geometry.attributes.position;
 
   for (let index = 0; index < position.count; index += 1) {
@@ -738,7 +734,7 @@ function createArch(radius, peakHeight, tubeRadius, material) {
   }
 
   return new THREE.Mesh(
-    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 48, tubeRadius, 10, false),
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 16, tubeRadius, 6, false),
     material,
   );
 }
@@ -766,9 +762,9 @@ function createTubeConnector(start, end, radius, shellMaterial, innerMaterial, r
   const curve = new THREE.CatmullRomCurve3([start, mid, end]);
   const group = new THREE.Group();
 
-  const shell = new THREE.Mesh(new THREE.TubeGeometry(curve, 72, radius, 18, false), shellMaterial);
+  const shell = new THREE.Mesh(new THREE.TubeGeometry(curve, 16, radius, 10, false), shellMaterial);
   const inner = new THREE.Mesh(
-    new THREE.TubeGeometry(curve, 72, radius * 0.68, 18, false),
+    new THREE.TubeGeometry(curve, 16, radius * 0.68, 10, false),
     innerMaterial,
   );
   group.add(shell, inner);
@@ -893,12 +889,7 @@ function createGreenhouseModule(materials, animated) {
     }
   }
 
-  for (let index = 0; index < 6; index += 1) {
-    const arch = createArch(10.15, 10.1, 0.08, materials.frame);
-    arch.position.y = 2.55;
-    arch.rotation.y = (index / 6) * Math.PI;
-    module.add(arch);
-  }
+  // Greenhouse arches removed for cleaner look
 
   for (let index = 0; index < 3; index += 1) {
     const growLight = new THREE.Mesh(
@@ -1369,23 +1360,23 @@ function createStation(scene, textures, getHeightAt, animated) {
     }),
   };
 
-  const centralDeck = new THREE.Mesh(new THREE.CylinderGeometry(38.5, 42.5, 5.2, 96), materials.deck);
+  const centralDeck = new THREE.Mesh(new THREE.CylinderGeometry(38.5, 42.5, 5.2, 48), materials.deck);
   centralDeck.position.y = 2.6;
 
-  const deckSkirt = new THREE.Mesh(new THREE.CylinderGeometry(43.6, 46.5, 1.2, 96), materials.darkHull);
+  const deckSkirt = new THREE.Mesh(new THREE.CylinderGeometry(43.6, 46.5, 1.2, 48), materials.darkHull);
   deckSkirt.position.y = 0.6;
 
   const deckLip = new THREE.Mesh(new THREE.TorusGeometry(39.8, 0.65, 10, 180), materials.darkHull);
   deckLip.position.y = 5.05;
 
-  const lowerCollar = new THREE.Mesh(new THREE.CylinderGeometry(16.8, 18.2, 1.1, 72), materials.hull);
+  const lowerCollar = new THREE.Mesh(new THREE.CylinderGeometry(16.8, 18.2, 1.1, 36), materials.hull);
   lowerCollar.position.y = 5.5;
 
   const coreBase = new THREE.Mesh(new THREE.CylinderGeometry(14, 16.8, 5.6, 64), materials.darkHull);
   coreBase.position.y = 7.45;
 
   const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(14.4, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.SphereGeometry(14.4, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
     materials.glass,
   );
   dome.position.y = 10.25;
@@ -1477,12 +1468,7 @@ function createStation(scene, textures, getHeightAt, animated) {
     station.add(support);
   }
 
-  for (let index = 0; index < 4; index += 1) {
-    const arch = createArch(14.2, 13.8, 0.14, materials.frame);
-    arch.position.y = 10.1;
-    arch.rotation.y = (index / 4) * Math.PI * 0.5;
-    station.add(arch);
-  }
+  // Structural arches removed for cleaner look
 
   for (let index = 0; index < 8; index += 1) {
     const angle = (index / 8) * Math.PI * 2 + Math.PI / 8;
@@ -1517,7 +1503,7 @@ function createStation(scene, textures, getHeightAt, animated) {
       materials.darkHull,
       materials.glow,
       materials.frame,
-      0.85,
+      0.2,
     );
     station.add(connector);
   });
@@ -1568,7 +1554,7 @@ function createStation(scene, textures, getHeightAt, animated) {
       materials.darkHull,
       materials.glow,
       materials.frame,
-      3.6,
+      0.5,
     );
     station.add(connector);
 
@@ -1589,15 +1575,15 @@ function createStation(scene, textures, getHeightAt, animated) {
   landingPad.position.copy(landingPadPosition);
   landingPad.position.y = landingPadGround;
 
-  const landingBase = new THREE.Mesh(new THREE.CylinderGeometry(18.5, 21.5, 1.6, 72), materials.darkHull);
+  const landingBase = new THREE.Mesh(new THREE.CylinderGeometry(18.5, 21.5, 1.6, 36), materials.darkHull);
   landingBase.position.y = 0.8;
 
-  const landingSurface = new THREE.Mesh(new THREE.CylinderGeometry(17.8, 17.8, 0.28, 72), materials.deck);
+  const landingSurface = new THREE.Mesh(new THREE.CylinderGeometry(17.8, 17.8, 0.28, 36), materials.deck);
   landingSurface.position.y = 1.76;
 
   landingPad.add(landingBase, landingSurface);
 
-  const landingRing = new THREE.Mesh(new THREE.TorusGeometry(12.5, 0.18, 8, 96), materials.frame);
+  const landingRing = new THREE.Mesh(new THREE.TorusGeometry(12.5, 0.18, 8, 48), materials.frame);
   landingRing.rotation.x = Math.PI / 2;
   landingRing.position.y = 1.95;
   landingPad.add(landingRing);
@@ -1783,7 +1769,7 @@ function createDustLayer({ count, area, minHeight, maxHeight, speed, size, textu
 
 function createDustLayers(scene, textures, animated) {
   const highLayer = createDustLayer({
-    count: 960,
+    count: 400,
     area: 540,
     minHeight: 10,
     maxHeight: 42,
@@ -1796,7 +1782,7 @@ function createDustLayers(scene, textures, animated) {
   scene.add(highLayer.points);
 
   const lowLayer = createDustLayer({
-    count: 720,
+    count: 300,
     area: 360,
     minHeight: 1,
     maxHeight: 10,
@@ -1816,8 +1802,8 @@ function createDustLayers(scene, textures, animated) {
 
 export function createMarsBaseExperience(renderer) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x11070a);
-  scene.fog = new THREE.Fog(0x8e4b2d, 130, 360);
+  scene.background = new THREE.Color(0xc4836a);
+  scene.fog = new THREE.Fog(0xc4836a, 120, 340);
 
   const camera = new THREE.PerspectiveCamera(
     40,
@@ -1845,20 +1831,6 @@ export function createMarsBaseExperience(renderer) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
-  const ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
-  ssaoPass.kernelRadius = 14;
-  ssaoPass.minDistance = 0.002;
-  ssaoPass.maxDistance = 0.16;
-  composer.addPass(ssaoPass);
-
-  const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.2,
-    0.55,
-    0.92,
-  );
-  composer.addPass(bloomPass);
-
   const animated = [];
   const textures = createTextures(renderer);
 
@@ -1877,7 +1849,7 @@ export function createMarsBaseExperience(renderer) {
       camera.updateProjectionMatrix();
       composer.setSize(width, height);
       composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      ssaoPass.setSize(width, height);
+      // post-processing resize handled by composer
     },
     resetCamera() {
       camera.position.copy(resetPosition);

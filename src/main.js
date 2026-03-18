@@ -11,11 +11,11 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance',
 });
 
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.98;
+renderer.toneMappingExposure = 1.6;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.style.touchAction = 'none';
@@ -25,7 +25,7 @@ root.appendChild(renderer.domElement);
 const experience = createMarsBaseExperience(renderer);
 
 function resize() {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
   experience.resize(window.innerWidth, window.innerHeight);
 }

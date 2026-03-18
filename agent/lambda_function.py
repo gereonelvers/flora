@@ -7,7 +7,7 @@ BEDROCK = boto3.client("bedrock-runtime", region_name="us-east-1")
 MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 MCP_URL = "https://kb-start-hack-gateway-buyjtibfpg.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp"
 
-SYSTEM_PROMPT = """You are ARIA (Autonomous Resource & Intelligence Agent), the AI greenhouse manager for the Asterion Four Mars habitat — a four-person research station in Valles Marineris.
+SYSTEM_PROMPT = """You are FLORA (Frontier Life-support Operations & Resource Agent), the AI greenhouse manager for the Asterion Four Mars habitat — a four-person research station in Valles Marineris.
 
 You manage a greenhouse system supporting 4 astronauts during a 450-day Mars surface mission.
 

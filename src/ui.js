@@ -61,7 +61,7 @@ export function initUI() {
       <button id="btn-advance-1" class="hud-btn">+1 Sol</button>
       <button id="btn-advance-10" class="hud-btn">+10 Sols</button>
       <button id="btn-advance-30" class="hud-btn">+30 Sols</button>
-      <button id="btn-auto-plant" class="hud-btn hud-btn-accent">Ask ARIA to Plan</button>
+      <button id="btn-auto-plant" class="hud-btn hud-btn-accent">Ask FLORA to Plan</button>
     </div>
   `;
   app.appendChild(hud);
@@ -71,22 +71,22 @@ export function initUI() {
   chat.id = 'chat-panel';
   chat.innerHTML = `
     <div class="chat-header" id="chat-toggle">
-      <span class="chat-title">ARIA</span>
-      <span class="chat-subtitle">Greenhouse AI Agent</span>
+      <span class="chat-title">FLORA</span>
+      <span class="chat-subtitle">Frontier Life-support Operations &amp; Resource Agent</span>
       <span class="chat-toggle-icon" id="chat-toggle-icon">▼</span>
     </div>
     <div class="chat-body" id="chat-body">
       <div class="chat-messages" id="chat-messages">
         <div class="chat-msg chat-msg-agent">
           <div class="chat-msg-content">
-            Hello, I'm <strong>ARIA</strong> — your autonomous greenhouse manager.
-            I can help you plan crops, optimize resources, and handle emergencies
+            Hello, I'm <strong>FLORA</strong> — your Frontier Life-support Operations &amp; Resource Agent.
+            I manage crop planning, resource optimization, and emergency response
             for the 450-day mission. What would you like to do first?
           </div>
         </div>
       </div>
       <div class="chat-input-area">
-        <input type="text" id="chat-input" placeholder="Ask ARIA anything..." autocomplete="off" />
+        <input type="text" id="chat-input" placeholder="Ask FLORA anything..." autocomplete="off" />
         <button id="chat-send" class="chat-send-btn">▶</button>
       </div>
     </div>
@@ -178,7 +178,7 @@ async function handleUserMessage(text) {
   // Add loading indicator
   const loadDiv = document.createElement('div');
   loadDiv.className = 'chat-msg chat-msg-agent chat-loading';
-  loadDiv.innerHTML = '<div class="chat-msg-content"><span class="typing-dots">●●●</span> ARIA is thinking...</div>';
+  loadDiv.innerHTML = '<div class="chat-msg-content"><span class="typing-dots">●●●</span> FLORA is thinking...</div>';
   messagesEl.appendChild(loadDiv);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 
