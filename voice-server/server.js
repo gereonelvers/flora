@@ -189,6 +189,7 @@ async function handleConnection(ws) {
   console.log('[voice] Bedrock stream established');
 
   const speculativeContentIds = new Set();
+  let pendingTool = null;
 
   (async () => {
     try {
@@ -216,11 +217,22 @@ async function handleConnection(ws) {
           ws.send(JSON.stringify({ type: 'text', content: evt.textOutput.content, role: evt.textOutput.role }));
         }
 
-        // Tool call → execute and send result back
+        // Tool call — store info when toolUse arrives, but DON'T execute yet
         if (evt.toolUse) {
-          const { toolName, toolUseId, content: toolInput } = evt.toolUse;
-          console.log(`[voice] Tool call: ${toolName} id=${toolUseId}`);
+          pendingTool = {
+            toolName: evt.toolUse.toolName,
+            toolUseId: evt.toolUse.toolUseId,
+            content: evt.toolUse.content,
+          };
+          console.log(`[voice] Tool requested: ${pendingTool.toolName} id=${pendingTool.toolUseId}`);
           ws.send(JSON.stringify({ type: 'status', message: 'Querying knowledge base...' }));
+        }
+
+        // Tool execution — wait for contentEnd with type=TOOL (Nova Sonic finished sending request)
+        if (evt.contentEnd?.type === 'TOOL' && pendingTool) {
+          console.log(`[voice] Tool contentEnd received, executing ${pendingTool.toolName}`);
+          const { toolName, toolUseId, content: toolInput } = pendingTool;
+          pendingTool = null;
 
           let toolResult = 'No additional results.';
           try {
