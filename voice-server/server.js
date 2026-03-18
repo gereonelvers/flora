@@ -230,6 +230,7 @@ async function handleConnection(ws) {
 
   // Track which content blocks are speculative (to avoid duplicate text)
   const speculativeContentIds = new Set();
+  let pendingToolCall = false;
 
   // Process output events from Nova Sonic
   (async () => {
@@ -248,6 +249,11 @@ async function handleConnection(ws) {
                 speculativeContentIds.add(evt.contentStart.contentId);
               }
             } catch {}
+          }
+
+          // Track tool content blocks via contentEnd stopReason
+          if (evt.contentEnd?.stopReason === 'TOOL_USE') {
+            pendingToolCall = true;
           }
 
           // Audio output → forward to browser
@@ -305,13 +311,17 @@ async function handleConnection(ws) {
             enqueueInput({
               contentEnd: { promptName, contentName: toolContentName },
             });
+            pendingToolCall = false;
 
             console.log('[voice] Tool result sent back to Nova Sonic');
           }
 
-          // Completion end — only signal turn_end for final responses, not after tool calls
-          if (evt.completionEnd && evt.completionEnd.stopReason !== 'TOOL_USE') {
-            ws.send(JSON.stringify({ type: 'turn_end' }));
+          // Completion end — signal turn_end so dashboard resets state
+          if (evt.completionEnd) {
+            console.log(`[voice] completionEnd stopReason=${evt.completionEnd.stopReason} pendingTool=${pendingToolCall}`);
+            if (!pendingToolCall) {
+              ws.send(JSON.stringify({ type: 'turn_end' }));
+            }
           }
         }
       }

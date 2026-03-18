@@ -56,7 +56,7 @@ function setFloraState(s) {
   if (s === 'thinking' || s === 'speaking') {
     stateTimeout = setTimeout(() => {
       if (floraState === 'thinking' || floraState === 'speaking') setFloraState('idle');
-    }, 30000);
+    }, 15000);
   }
 }
 
