@@ -1,7 +1,7 @@
 /**
  * FLORA Voice Server
  * Bridges browser WebSocket audio ↔ Nova Sonic bidirectional stream on Bedrock.
- * Nova Sonic handles speech-to-speech with tool calling (MCP knowledge base).
+ * Knowledge base is pre-loaded into system prompt AND available via tool calling.
  */
 
 import { BedrockRuntimeClient, InvokeModelWithBidirectionalStreamCommand } from '@aws-sdk/client-bedrock-runtime';
@@ -16,52 +16,15 @@ const REGION = process.env.AWS_DEFAULT_REGION || 'us-east-1';
 const MODEL_ID = 'amazon.nova-sonic-v1:0';
 const MCP_URL = 'https://kb-start-hack-gateway-buyjtibfpg.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp';
 
-const SYSTEM_PROMPT = `You are FLORA (Frontier Life-support Operations & Resource Agent), a voice AI assistant managing the greenhouse system at Asterion Four, a Mars habitat supporting 4 astronauts during a 450-day surface mission.
+// ── MCP Knowledge Base ───────────────────────────────────────────────
+let knowledgeCache = '';
 
-Your responsibilities:
-- Advise on crop selection, planting schedules, and harvest timing
-- Monitor environmental parameters (temperature, humidity, light, CO2, water)
-- Respond to abiotic stress events and emergencies
-- Provide scientifically grounded nutritional analysis
-
-When asked about crops, growing conditions, or Mars agriculture, use the query_knowledge_base tool to retrieve accurate data before answering.
-
-Keep responses concise and spoken-friendly — 2-3 sentences typically. You are speaking to astronauts on tablets. Be warm but professional. Avoid markdown formatting, bullet points, or tables since you are speaking, not writing.`;
-
-const TOOLS = [
-  {
-    toolSpec: {
-      name: 'query_knowledge_base',
-      description: 'Query the Mars agriculture knowledge base for crop profiles, environmental data, nutritional requirements, stress responses, and greenhouse management. Use this for ANY factual question about Mars agriculture or crops.',
-      inputSchema: {
-        json: JSON.stringify({
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              description: 'Search query about Mars agriculture, crops, environment, nutrition, or greenhouse management',
-            },
-          },
-          required: ['query'],
-        }),
-      },
-    },
-  },
-];
-
-// ── MCP Knowledge Base Query ─────────────────────────────────────────
 function queryMCP(query) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const payload = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name: 'kb-start-hack-target___knowledge_base_retrieve',
-        arguments: { query, max_results: 5 },
-      },
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: 'kb-start-hack-target___knowledge_base_retrieve', arguments: { query, max_results: 10 } },
     });
-
     const url = new URL(MCP_URL);
     const req = https.request(
       { hostname: url.hostname, path: url.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
@@ -76,20 +39,57 @@ function queryMCP(query) {
               const parsed = JSON.parse(content[0].text);
               const body = typeof parsed.body === 'string' ? JSON.parse(parsed.body) : parsed.body;
               const chunks = body?.retrieved_chunks || [];
-              resolve(chunks.map((c) => c.content).join('\n\n---\n\n'));
-            } else {
-              resolve('No results found.');
-            }
-          } catch (e) {
-            resolve('Error parsing knowledge base response.');
-          }
+              resolve(chunks.map((c) => c.content).join('\n\n'));
+            } else resolve('No results found.');
+          } catch { resolve('Error parsing response.'); }
         });
       }
     );
-    req.on('error', (e) => resolve(`Knowledge base query failed: ${e.message}`));
+    req.on('error', () => resolve('Knowledge base unavailable.'));
     req.write(payload);
     req.end();
   });
+}
+
+async function loadKnowledgeBase() {
+  console.log('[voice] Pre-loading knowledge base...');
+  const queries = [
+    'Mars greenhouse crop profiles lettuce potato radish bean spinach herbs growth cycle yield nutritional contribution',
+    'Mars environmental conditions temperature humidity light CO2 water soil regolith hydroponic requirements',
+    'Nutritional requirements for 4 astronauts caloric protein vitamin mineral dietary balance 450-day mission',
+    'Abiotic stress responses drought heat cold light deficiency salinity crop sensitivity',
+    'Water recycling resource management energy budget greenhouse operations Mars',
+  ];
+  const results = await Promise.all(queries.map((q) => queryMCP(q)));
+  knowledgeCache = results.filter(Boolean).join('\n\n---\n\n');
+  console.log(`[voice] Knowledge base loaded: ${knowledgeCache.length} chars`);
+}
+
+const TOOLS = [{
+  toolSpec: {
+    name: 'query_knowledge_base',
+    description: 'Query the Mars agriculture knowledge base for specific crop data, environmental parameters, nutritional info, or greenhouse management details not covered in your pre-loaded context.',
+    inputSchema: {
+      json: JSON.stringify({
+        type: 'object',
+        properties: { query: { type: 'string', description: 'Specific search query' } },
+        required: ['query'],
+      }),
+    },
+  },
+}];
+
+function getSystemPrompt() {
+  return `You are FLORA (Frontier Life-support Operations & Resource Agent), a voice AI assistant managing the greenhouse system at Asterion Four, a Mars habitat supporting 4 astronauts during a 450-day surface mission.
+
+Your responsibilities: crop selection and scheduling, environmental monitoring, abiotic stress response, nutritional analysis.
+
+Keep responses concise and spoken-friendly — 2-3 sentences typically. You are speaking to astronauts on tablets. Be warm but professional. No markdown, no bullet points, no tables — you are speaking.
+
+You have a query_knowledge_base tool for specific lookups, but most information you need is already in your reference data below. Prefer using this reference data directly over making tool calls.
+
+REFERENCE DATA:
+${knowledgeCache}`;
 }
 
 // ── Bedrock Client ───────────────────────────────────────────────────
@@ -105,7 +105,6 @@ function createBedrockClient() {
   });
 }
 
-// ── Event Helpers ────────────────────────────────────────────────────
 function encodeEvent(event) {
   return new TextEncoder().encode(JSON.stringify({ event }));
 }
@@ -123,74 +122,43 @@ async function handleConnection(ws) {
   let resolveNextInput;
   const inputQueue = [];
 
-  // Async iterable that feeds events to Bedrock
   async function* inputStream() {
-    // 1. Session start
     yield { chunk: { bytes: encodeEvent({
-      sessionStart: {
-        inferenceConfiguration: { maxTokens: 1024, topP: 0.9, temperature: 0.7 },
-      },
+      sessionStart: { inferenceConfiguration: { maxTokens: 1024, topP: 0.9, temperature: 0.7 } },
     }) } };
 
-    // 2. Prompt start with tools and voice config
     yield { chunk: { bytes: encodeEvent({
       promptStart: {
         promptName,
         textOutputConfiguration: { mediaType: 'text/plain' },
         audioOutputConfiguration: {
-          mediaType: 'audio/lpcm',
-          sampleRateHertz: 24000,
-          sampleSizeBits: 16,
-          channelCount: 1,
-          voiceId: 'tiffany',
-          encoding: 'base64',
-          audioType: 'SPEECH',
+          mediaType: 'audio/lpcm', sampleRateHertz: 24000, sampleSizeBits: 16,
+          channelCount: 1, voiceId: 'tiffany', encoding: 'base64', audioType: 'SPEECH',
         },
         toolUseOutputConfiguration: { mediaType: 'application/json' },
         toolConfiguration: { tools: TOOLS, toolChoice: { auto: {} } },
       },
     }) } };
 
-    // 3. System prompt
+    // System prompt with pre-loaded knowledge
     yield { chunk: { bytes: encodeEvent({
-      contentStart: {
-        promptName,
-        contentName: systemContentName,
-        type: 'TEXT',
-        interactive: false,
-        role: 'SYSTEM',
-        textInputConfiguration: { mediaType: 'text/plain' },
-      },
+      contentStart: { promptName, contentName: systemContentName, type: 'TEXT', interactive: false, role: 'SYSTEM', textInputConfiguration: { mediaType: 'text/plain' } },
     }) } };
-
     yield { chunk: { bytes: encodeEvent({
-      textInput: { promptName, contentName: systemContentName, content: SYSTEM_PROMPT },
+      textInput: { promptName, contentName: systemContentName, content: getSystemPrompt() },
     }) } };
-
     yield { chunk: { bytes: encodeEvent({
       contentEnd: { promptName, contentName: systemContentName },
     }) } };
 
-    // 4. Start audio content block
+    // Audio input stream
     yield { chunk: { bytes: encodeEvent({
       contentStart: {
-        promptName,
-        contentName: audioContentName,
-        type: 'AUDIO',
-        interactive: true,
-        role: 'USER',
-        audioInputConfiguration: {
-          mediaType: 'audio/lpcm',
-          sampleRateHertz: 16000,
-          sampleSizeBits: 16,
-          channelCount: 1,
-          audioType: 'SPEECH',
-          encoding: 'base64',
-        },
+        promptName, contentName: audioContentName, type: 'AUDIO', interactive: true, role: 'USER',
+        audioInputConfiguration: { mediaType: 'audio/lpcm', sampleRateHertz: 16000, sampleSizeBits: 16, channelCount: 1, audioType: 'SPEECH', encoding: 'base64' },
       },
     }) } };
 
-    // 5. Yield audio chunks and tool results as they come in
     while (!inputClosed) {
       if (inputQueue.length > 0) {
         yield inputQueue.shift();
@@ -198,11 +166,7 @@ async function handleConnection(ws) {
         await new Promise((r) => { resolveNextInput = r; });
       }
     }
-
-    // Drain remaining
-    while (inputQueue.length > 0) {
-      yield inputQueue.shift();
-    }
+    while (inputQueue.length > 0) yield inputQueue.shift();
   }
 
   function enqueueInput(event) {
@@ -210,119 +174,81 @@ async function handleConnection(ws) {
     resolveNextInput?.();
   }
 
-  // Start the bidirectional stream
   let response;
   try {
     response = await client.send(
-      new InvokeModelWithBidirectionalStreamCommand({
-        modelId: MODEL_ID,
-        body: inputStream(),
-      })
+      new InvokeModelWithBidirectionalStreamCommand({ modelId: MODEL_ID, body: inputStream() })
     );
   } catch (err) {
-    console.error('[voice] Failed to start Bedrock stream:', err.message);
-    ws.send(JSON.stringify({ type: 'error', message: `Bedrock connection failed: ${err.message}` }));
+    console.error('[voice] Bedrock stream failed:', err.message);
+    ws.send(JSON.stringify({ type: 'error', message: `Bedrock error: ${err.message}` }));
     ws.close();
     return;
   }
 
   console.log('[voice] Bedrock stream established');
 
-  // Track which content blocks are speculative (to avoid duplicate text)
   const speculativeContentIds = new Set();
-  let pendingToolCall = false;
 
-  // Process output events from Nova Sonic
   (async () => {
     try {
       for await (const event of response.body) {
-        if (event.chunk?.bytes) {
-          const parsed = JSON.parse(new TextDecoder().decode(event.chunk.bytes));
-          const evt = parsed.event;
-          if (!evt) continue;
+        if (!event.chunk?.bytes) continue;
+        const parsed = JSON.parse(new TextDecoder().decode(event.chunk.bytes));
+        const evt = parsed.event;
+        if (!evt) continue;
 
-          // Track speculative vs final content blocks
-          if (evt.contentStart?.additionalModelFields) {
-            try {
-              const fields = JSON.parse(evt.contentStart.additionalModelFields);
-              if (fields.generationStage === 'SPECULATIVE') {
-                speculativeContentIds.add(evt.contentStart.contentId);
-              }
-            } catch {}
-          }
+        // Track speculative content
+        if (evt.contentStart?.additionalModelFields) {
+          try {
+            if (JSON.parse(evt.contentStart.additionalModelFields).generationStage === 'SPECULATIVE')
+              speculativeContentIds.add(evt.contentStart.contentId);
+          } catch {}
+        }
 
-          // Track tool content blocks via contentEnd stopReason
-          if (evt.contentEnd?.stopReason === 'TOOL_USE') {
-            pendingToolCall = true;
-          }
+        // Audio → browser
+        if (evt.audioOutput) {
+          ws.send(JSON.stringify({ type: 'audio', data: evt.audioOutput.content }));
+        }
 
-          // Audio output → forward to browser
-          if (evt.audioOutput) {
-            ws.send(JSON.stringify({ type: 'audio', data: evt.audioOutput.content }));
-          }
+        // Text → browser (FINAL only)
+        if (evt.textOutput && !speculativeContentIds.has(evt.textOutput.contentId)) {
+          ws.send(JSON.stringify({ type: 'text', content: evt.textOutput.content, role: evt.textOutput.role }));
+        }
 
-          // Text output → only forward FINAL text (skip SPECULATIVE to avoid duplicates)
-          if (evt.textOutput && !speculativeContentIds.has(evt.textOutput.contentId)) {
-            ws.send(JSON.stringify({
-              type: 'text',
-              content: evt.textOutput.content,
-              role: evt.textOutput.role,
-            }));
-          }
+        // Tool call → execute and send result back
+        if (evt.toolUse) {
+          const { toolName, toolUseId, content: toolInput } = evt.toolUse;
+          console.log(`[voice] Tool call: ${toolName} id=${toolUseId}`);
+          ws.send(JSON.stringify({ type: 'status', message: 'Querying knowledge base...' }));
 
-          // Tool use request → execute and return result
-          if (evt.toolUse) {
-            console.log(`[voice] Tool call: ${evt.toolUse.toolName}`, evt.toolUse.content);
-            ws.send(JSON.stringify({ type: 'status', message: 'Querying knowledge base...' }));
-
-            let toolResult = 'No results';
-            try {
-              const input = JSON.parse(evt.toolUse.content);
-              if (evt.toolUse.toolName === 'query_knowledge_base') {
-                toolResult = await queryMCP(input.query);
-              }
-            } catch (e) {
-              toolResult = `Tool error: ${e.message}`;
+          let toolResult = 'No additional results.';
+          try {
+            const input = JSON.parse(toolInput);
+            if (toolName === 'query_knowledge_base') {
+              toolResult = await queryMCP(input.query);
             }
-
-            // Send tool result back to Nova Sonic
-            const toolContentName = randomUUID();
-            enqueueInput({
-              contentStart: {
-                promptName,
-                contentName: toolContentName,
-                interactive: false,
-                type: 'TOOL',
-                role: 'TOOL',
-                toolResultInputConfiguration: {
-                  toolUseId: evt.toolUse.toolUseId,
-                  type: 'TEXT',
-                  textInputConfiguration: { mediaType: 'text/plain' },
-                },
-              },
-            });
-            enqueueInput({
-              toolResult: {
-                promptName,
-                contentName: toolContentName,
-                content: toolResult.slice(0, 4000),
-              },
-            });
-            enqueueInput({
-              contentEnd: { promptName, contentName: toolContentName },
-            });
-            pendingToolCall = false;
-
-            console.log('[voice] Tool result sent back to Nova Sonic');
+          } catch (e) {
+            toolResult = `Error: ${e.message}`;
           }
+          console.log(`[voice] Tool result: ${toolResult.length} chars, sending back`);
 
-          // Completion end — signal turn_end so dashboard resets state
-          if (evt.completionEnd) {
-            console.log(`[voice] completionEnd stopReason=${evt.completionEnd.stopReason} pendingTool=${pendingToolCall}`);
-            if (!pendingToolCall) {
-              ws.send(JSON.stringify({ type: 'turn_end' }));
-            }
-          }
+          const toolContentName = randomUUID();
+          enqueueInput({
+            contentStart: {
+              promptName, contentName: toolContentName, interactive: false, type: 'TOOL', role: 'TOOL',
+              toolResultInputConfiguration: { toolUseId, type: 'TEXT', textInputConfiguration: { mediaType: 'text/plain' } },
+            },
+          });
+          enqueueInput({ toolResult: { promptName, contentName: toolContentName, content: toolResult.slice(0, 4000) } });
+          enqueueInput({ contentEnd: { promptName, contentName: toolContentName } });
+        }
+
+        // Turn complete
+        if (evt.completionEnd) {
+          console.log(`[voice] completionEnd stopReason=${evt.completionEnd.stopReason}`);
+          // Always send turn_end — the dashboard has a safety timeout anyway
+          ws.send(JSON.stringify({ type: 'turn_end' }));
         }
       }
     } catch (err) {
@@ -330,47 +256,28 @@ async function handleConnection(ws) {
     }
   })();
 
-  // Handle incoming WebSocket messages (audio from browser)
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
-
       if (msg.type === 'audio') {
-        // Forward audio chunk to Nova Sonic
-        enqueueInput({
-          audioInput: {
-            promptName,
-            contentName: audioContentName,
-            content: msg.data,
-          },
-        });
+        enqueueInput({ audioInput: { promptName, contentName: audioContentName, content: msg.data } });
       }
-    } catch (e) {
-      console.error('[voice] Bad message:', e.message);
-    }
+    } catch {}
   });
 
   ws.on('close', () => {
     console.log('[voice] Client disconnected');
-
-    // Close the stream gracefully
     enqueueInput({ contentEnd: { promptName, contentName: audioContentName } });
     enqueueInput({ promptEnd: { promptName } });
     enqueueInput({ sessionEnd: {} });
-
     setTimeout(() => { inputClosed = true; resolveNextInput?.(); }, 500);
   });
 
-  ws.on('error', (err) => {
-    console.error('[voice] WebSocket error:', err.message);
-    inputClosed = true;
-    resolveNextInput?.();
-  });
+  ws.on('error', () => { inputClosed = true; resolveNextInput?.(); });
 }
 
 // ── Start Server ─────────────────────────────────────────────────────
-const httpServer = http.createServer((req, res) => {
-  // Health check
+const httpServer = http.createServer((_, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   res.end(JSON.stringify({ status: 'ok', service: 'flora-voice-server' }));
 });
@@ -378,7 +285,8 @@ const httpServer = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server: httpServer });
 wss.on('connection', handleConnection);
 
-httpServer.listen(PORT, () => {
-  console.log(`FLORA Voice Server running on ws://localhost:${PORT}`);
-  console.log(`Using model: ${MODEL_ID} in ${REGION}`);
+loadKnowledgeBase().then(() => {
+  httpServer.listen(PORT, () => {
+    console.log(`FLORA Voice Server running on ws://localhost:${PORT}`);
+  });
 });
