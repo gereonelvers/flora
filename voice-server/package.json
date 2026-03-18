@@ -1,0 +1,13 @@
+{
+  "name": "flora-voice-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "latest",
+    "@smithy/node-http-handler": "latest",
+    "ws": "^8.18.0"
+  }
+}

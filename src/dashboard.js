@@ -4,8 +4,19 @@ import { createInitialState, advanceSol, applyActions, CROP_DB } from './greenho
 let state = createInitialState();
 let chatHistory = [];
 let isListening = false;
-let recognition = null;
 let floraState = 'idle'; // idle | listening | thinking | speaking | alert
+
+// ── Voice Server Connection ──────────────────────────────────────────
+const VOICE_WS_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'ws://localhost:8765'
+  : `wss://${location.hostname}:8765`; // adjust for deployment
+
+let voiceSocket = null;
+let audioContext = null;
+let mediaStream = null;
+let audioWorkletNode = null;
+let playbackQueue = [];
+let isPlaying = false;
 
 // ── State config (colors, scale, labels) ─────────────────────────────
 const FLORA_STATES = {
@@ -41,52 +52,183 @@ function setFloraState(s) {
   updateAvatar();
 }
 
-// ── Speech Recognition ───────────────────────────────────────────────
-function initSpeechRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return null;
-  const r = new SR();
-  r.continuous = false;
-  r.interimResults = true;
-  r.lang = 'en-US';
-  r.onresult = (e) => {
-    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
-    const input = document.getElementById('d-input');
-    if (input) input.value = transcript;
-    if (e.results[0].isFinal) {
-      stopListening();
-      if (transcript.trim()) handleSend(transcript.trim());
-    }
-  };
-  r.onend = () => stopListening();
-  r.onerror = () => stopListening();
-  return r;
+// ── Audio Playback (PCM 24kHz from Nova Sonic) ──────────────────────
+function enqueueAudio(base64Pcm) {
+  // Decode base64 → Int16 PCM → Float32
+  const raw = atob(base64Pcm);
+  const int16 = new Int16Array(raw.length / 2);
+  for (let i = 0; i < int16.length; i++) {
+    int16[i] = raw.charCodeAt(i * 2) | (raw.charCodeAt(i * 2 + 1) << 8);
+  }
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) {
+    float32[i] = int16[i] / 32768;
+  }
+  playbackQueue.push(float32);
+  if (!isPlaying) playNextChunk();
 }
 
-function startListening() {
-  if (!recognition) recognition = initSpeechRecognition();
-  if (!recognition) return;
+function playNextChunk() {
+  if (playbackQueue.length === 0) { isPlaying = false; return; }
+  isPlaying = true;
+  if (!audioContext) audioContext = new AudioContext({ sampleRate: 24000 });
+
+  // Batch multiple chunks for smoother playback
+  const chunks = playbackQueue.splice(0, Math.min(playbackQueue.length, 8));
+  const totalLen = chunks.reduce((s, c) => s + c.length, 0);
+  const merged = new Float32Array(totalLen);
+  let offset = 0;
+  for (const c of chunks) { merged.set(c, offset); offset += c.length; }
+
+  const buffer = audioContext.createBuffer(1, merged.length, 24000);
+  buffer.getChannelData(0).set(merged);
+  const source = audioContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioContext.destination);
+  source.onended = () => playNextChunk();
+  source.start();
+}
+
+// ── Voice WebSocket Connection ───────────────────────────────────────
+function connectVoice() {
+  if (voiceSocket?.readyState === WebSocket.OPEN) return;
+
+  voiceSocket = new WebSocket(VOICE_WS_URL);
+  voiceSocket.onopen = () => {
+    console.log('[voice] Connected to FLORA voice server');
+    appendSystemMsg('Voice connected — tap mic to speak');
+  };
+  voiceSocket.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    switch (msg.type) {
+      case 'audio':
+        if (floraState !== 'speaking') setFloraState('speaking');
+        enqueueAudio(msg.data);
+        break;
+      case 'text':
+        if (msg.role === 'USER') {
+          // ASR transcription of user speech
+          appendChatMsg(msg.content, 'user');
+        } else if (msg.role === 'ASSISTANT') {
+          appendChatMsg(msg.content, 'agent');
+        }
+        break;
+      case 'status':
+        setFloraState('thinking');
+        break;
+      case 'turn_end':
+        setTimeout(() => {
+          if (floraState === 'speaking') setFloraState('idle');
+        }, 1500); // small delay for audio queue to drain
+        break;
+      case 'error':
+        appendSystemMsg('Error: ' + msg.message);
+        setFloraState('alert');
+        break;
+    }
+  };
+  voiceSocket.onclose = () => {
+    console.log('[voice] Disconnected');
+    voiceSocket = null;
+  };
+  voiceSocket.onerror = (err) => {
+    console.error('[voice] WebSocket error');
+    appendSystemMsg('Voice server not available — using text mode');
+    voiceSocket = null;
+  };
+}
+
+function appendSystemMsg(text) {
+  const msgs = document.getElementById('d-messages');
+  if (msgs) {
+    msgs.innerHTML += `<div class="d-msg d-msg-system"><div class="d-msg-text">${text}</div></div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+function appendChatMsg(text, role) {
+  const msgs = document.getElementById('d-messages');
+  if (!msgs) return;
+  const cls = role === 'user' ? 'd-msg-user' : 'd-msg-agent';
+  msgs.innerHTML += `<div class="d-msg ${cls}"><div class="d-msg-text">${md(text)}</div></div>`;
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── Mic Audio Capture (PCM 16kHz → base64 → WebSocket) ──────────────
+async function startListening() {
+  // Connect to voice server if not connected
+  connectVoice();
+
+  if (!audioContext) audioContext = new AudioContext({ sampleRate: 24000 });
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    });
+  } catch (err) {
+    appendSystemMsg('Microphone access denied');
+    return;
+  }
+
   isListening = true;
   setFloraState('listening');
-  try { recognition.start(); } catch {}
+
+  // Use ScriptProcessorNode for broad compatibility (AudioWorklet not on all iPads)
+  const micCtx = new AudioContext({ sampleRate: 16000 });
+  const source = micCtx.createMediaStreamSource(mediaStream);
+  const processor = micCtx.createScriptProcessor(1024, 1, 1);
+
+  processor.onaudioprocess = (e) => {
+    if (!isListening || !voiceSocket || voiceSocket.readyState !== WebSocket.OPEN) return;
+    const float32 = e.inputBuffer.getChannelData(0);
+    // Convert Float32 → Int16
+    const int16 = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      int16[i] = Math.max(-32768, Math.min(32767, Math.round(float32[i] * 32768)));
+    }
+    // Convert to base64
+    const bytes = new Uint8Array(int16.buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64 = btoa(binary);
+
+    voiceSocket.send(JSON.stringify({ type: 'audio', data: base64 }));
+  };
+
+  source.connect(processor);
+  processor.connect(micCtx.destination);
+
+  // Store refs for cleanup
+  window._micCtx = micCtx;
+  window._processor = processor;
+  window._source = source;
 }
 
 function stopListening() {
   isListening = false;
   if (floraState === 'listening') setFloraState('idle');
-  try { recognition?.stop(); } catch {}
+
+  // Stop mic
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+  try {
+    window._processor?.disconnect();
+    window._source?.disconnect();
+    window._micCtx?.close();
+  } catch {}
 }
 
+// Fallback: text-to-speech for text-only mode
 function speak(text) {
+  if (voiceSocket?.readyState === WebSocket.OPEN) return; // Nova Sonic handles voice
   const clean = text.replace(/[#*`|_\[\]{}()>]/g, '').replace(/\n+/g, '. ').slice(0, 600);
   const u = new SpeechSynthesisUtterance(clean);
   u.rate = 1.05;
   u.pitch = 0.95;
   setFloraState('speaking');
-  u.onend = () => {
-    if (state.alerts.length > 0) setFloraState('alert');
-    else setFloraState('idle');
-  };
+  u.onend = () => setFloraState('idle');
   speechSynthesis.speak(u);
 }
 
@@ -438,6 +580,7 @@ html,body,#dashboard{width:100%;height:100%;overflow:hidden;background:var(--bg)
 .d-code{background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-family:'JetBrains Mono',monospace;font-size:0.65rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
 .d-msg-action .d-msg-text{background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.15);border-radius:8px;display:flex;align-items:center;justify-content:space-between}
 .d-msg-error .d-msg-text{background:rgba(248,113,113,0.06);border:1px solid rgba(248,113,113,0.12);color:var(--crit);border-radius:8px}
+.d-msg-system .d-msg-text{background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.1);color:var(--text2);border-radius:8px;font-size:0.7rem;text-align:center;font-style:italic}
 .d-msg-loading .d-msg-text{color:var(--text2)}
 .d-dots{animation:pulse 1.2s infinite;letter-spacing:2px}
 @keyframes pulse{0%,100%{opacity:0.3}50%{opacity:1}}
