@@ -142,7 +142,7 @@ async function handleConnection(ws) {
           sampleRateHertz: 24000,
           sampleSizeBits: 16,
           channelCount: 1,
-          voiceId: 'matthew',
+          voiceId: 'tiffany',
           encoding: 'base64',
           audioType: 'SPEECH',
         },
