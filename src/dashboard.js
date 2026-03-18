@@ -9,7 +9,7 @@ let floraState = 'idle'; // idle | listening | thinking | speaking | alert
 // ── Voice Server Connection ──────────────────────────────────────────
 const VOICE_WS_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
   ? 'ws://localhost:8765'
-  : `wss://${location.hostname}:8765`; // adjust for deployment
+  : 'ws://flora-voice-alb-1571885373.us-east-1.elb.amazonaws.com';
 
 let voiceSocket = null;
 let audioContext = null;

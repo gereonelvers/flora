@@ -1,0 +1,12 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 872716504287.dkr.ecr.us-east-1.amazonaws.com
+  build:
+    commands:
+      - docker build -t flora-voice-server .
+      - docker tag flora-voice-server:latest 872716504287.dkr.ecr.us-east-1.amazonaws.com/flora-voice-server:latest
+  post_build:
+    commands:
+      - docker push 872716504287.dkr.ecr.us-east-1.amazonaws.com/flora-voice-server:latest
