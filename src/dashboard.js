@@ -118,8 +118,8 @@ function connectVoice() {
         break;
       case 'turn_end':
         setTimeout(() => {
-          if (floraState === 'speaking') setFloraState('idle');
-        }, 1500); // small delay for audio queue to drain
+          if (floraState !== 'listening') setFloraState('idle');
+        }, 1500);
         break;
       case 'error':
         appendSystemMsg('Error: ' + msg.message);
@@ -449,6 +449,8 @@ async function handleSend(text) {
     msgs.innerHTML += `<div class="d-msg d-msg-agent"><div class="d-msg-text">${md(response)}</div></div>`;
 
     speak(response);
+    // If voice socket handles audio, speak() returns early — reset state manually
+    if (voiceSocket?.readyState === WebSocket.OPEN) setFloraState('idle');
 
     const actions = parseActions(response);
     if (actions.length > 0) {
