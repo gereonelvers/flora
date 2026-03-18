@@ -212,9 +212,21 @@ async function handleConnection(ws) {
           ws.send(JSON.stringify({ type: 'audio', data: evt.audioOutput.content }));
         }
 
-        // Text → browser (FINAL only)
+        // Text → browser (FINAL only, skip interrupted markers)
         if (evt.textOutput && !speculativeContentIds.has(evt.textOutput.contentId)) {
-          ws.send(JSON.stringify({ type: 'text', content: evt.textOutput.content, role: evt.textOutput.role }));
+          // Barge-in: Nova Sonic sends {"interrupted": true} when user interrupts
+          if (evt.textOutput.content === '{"interrupted": true}' || evt.textOutput.content === '{"interrupted":true}') {
+            console.log('[voice] Barge-in detected, clearing audio');
+            ws.send(JSON.stringify({ type: 'interrupted' }));
+          } else {
+            ws.send(JSON.stringify({ type: 'text', content: evt.textOutput.content, role: evt.textOutput.role }));
+          }
+        }
+
+        // Also detect interrupted via contentEnd
+        if (evt.contentEnd?.stopReason === 'INTERRUPTED') {
+          console.log('[voice] Content interrupted');
+          ws.send(JSON.stringify({ type: 'interrupted' }));
         }
 
         // Tool call — store info when toolUse arrives, but DON'T execute yet

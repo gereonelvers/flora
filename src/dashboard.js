@@ -129,6 +129,16 @@ function connectVoice() {
           if (floraState !== 'listening') setFloraState('idle');
         }, 1500);
         break;
+      case 'interrupted':
+        // Barge-in: clear audio playback immediately
+        playbackQueue.length = 0;
+        isPlaying = false;
+        if (audioContext) {
+          audioContext.close().catch(() => {});
+          audioContext = null;
+        }
+        setFloraState('listening');
+        break;
       case 'error':
         appendSystemMsg('Error: ' + msg.message);
         setFloraState('alert');
