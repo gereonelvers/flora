@@ -228,6 +228,9 @@ async function handleConnection(ws) {
 
   console.log('[voice] Bedrock stream established');
 
+  // Track which content blocks are speculative (to avoid duplicate text)
+  const speculativeContentIds = new Set();
+
   // Process output events from Nova Sonic
   (async () => {
     try {
@@ -237,16 +240,23 @@ async function handleConnection(ws) {
           const evt = parsed.event;
           if (!evt) continue;
 
+          // Track speculative vs final content blocks
+          if (evt.contentStart?.additionalModelFields) {
+            try {
+              const fields = JSON.parse(evt.contentStart.additionalModelFields);
+              if (fields.generationStage === 'SPECULATIVE') {
+                speculativeContentIds.add(evt.contentStart.contentId);
+              }
+            } catch {}
+          }
+
           // Audio output → forward to browser
           if (evt.audioOutput) {
             ws.send(JSON.stringify({ type: 'audio', data: evt.audioOutput.content }));
           }
 
-          // Text output → forward as transcript
-          if (evt.textOutput) {
-            const stage = evt.contentStart?.additionalModelFields
-              ? JSON.parse(evt.contentStart.additionalModelFields).generationStage
-              : null;
+          // Text output → only forward FINAL text (skip SPECULATIVE to avoid duplicates)
+          if (evt.textOutput && !speculativeContentIds.has(evt.textOutput.contentId)) {
             ws.send(JSON.stringify({
               type: 'text',
               content: evt.textOutput.content,
