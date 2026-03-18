@@ -19,11 +19,11 @@ const MCP_URL = 'https://kb-start-hack-gateway-buyjtibfpg.gateway.bedrock-agentc
 // ── MCP Knowledge Base ───────────────────────────────────────────────
 let knowledgeCache = '';
 
-function queryMCP(query) {
+function queryMCP(query, maxResults = 10) {
   return new Promise((resolve) => {
     const payload = JSON.stringify({
       jsonrpc: '2.0', id: 1, method: 'tools/call',
-      params: { name: 'kb-start-hack-target___knowledge_base_retrieve', arguments: { query, max_results: 10 } },
+      params: { name: 'kb-start-hack-target___knowledge_base_retrieve', arguments: { query, max_results: maxResults } },
     });
     const url = new URL(MCP_URL);
     const req = https.request(
@@ -250,10 +250,14 @@ async function handleConnection(ws) {
           try {
             const input = JSON.parse(toolInput);
             if (toolName === 'query_knowledge_base') {
-              toolResult = await queryMCP(input.query);
+              toolResult = await queryMCP(input.query, 3);
             }
           } catch (e) {
             toolResult = `Error: ${e.message}`;
+          }
+          // Nova Sonic has a limit on tool result size — truncate aggressively
+          if (toolResult.length > 2000) {
+            toolResult = toolResult.slice(0, 2000) + '\n[truncated]';
           }
           console.log(`[voice] Tool result: ${toolResult.length} chars, sending back`);
 
@@ -264,7 +268,7 @@ async function handleConnection(ws) {
               toolResultInputConfiguration: { toolUseId, type: 'TEXT', textInputConfiguration: { mediaType: 'text/plain' } },
             },
           });
-          enqueueInput({ toolResult: { promptName, contentName: toolContentName, content: toolResult.slice(0, 4000) } });
+          enqueueInput({ toolResult: { promptName, contentName: toolContentName, content: toolResult } });
           enqueueInput({ contentEnd: { promptName, contentName: toolContentName } });
         }
 
