@@ -273,7 +273,9 @@ async function handleConnection(ws) {
               toolResultInputConfiguration: { toolUseId, type: 'TEXT', textInputConfiguration: { mediaType: 'text/plain' } },
             },
           });
-          enqueueInput({ toolResult: { promptName, contentName: toolContentName, content: toolResult } });
+          // Nova Sonic expects tool result content to be valid JSON
+          const jsonResult = JSON.stringify({ result: toolResult });
+          enqueueInput({ toolResult: { promptName, contentName: toolContentName, content: jsonResult } });
           enqueueInput({ contentEnd: { promptName, contentName: toolContentName } });
         }
 
