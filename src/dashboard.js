@@ -1253,7 +1253,7 @@ function render() {
 
   // Journal toggle
   const journalToggle = document.getElementById('d-journal-toggle');
-  const journalList = document.getElementById('d-journal-list');
+  const journalList = document.getElementById('d-status-list');
   if (journalToggle && journalList) {
     journalToggle.onclick = () => journalList.classList.toggle('open');
   }
@@ -2100,6 +2100,20 @@ document.head.appendChild(style);
     // Ensure started flag exists for old states
     if (!('started' in state.mission)) state.mission.started = state.mission.currentSol > 1;
   }
+  // Populate Activity Log from existing floraLog on load
+  const existingLog = state.floraLog || [];
+  for (const entry of existingLog) {
+    if (entry.actions && entry.actions.length > 0) {
+      const summary = entry.actions.map(a => {
+        if (a.type === 'plant') return `Planted ${a.crop} in Module ${a.module} (${a.area_m2}m²)`;
+        if (a.type === 'adjust_temperature') return `Set Module ${a.module} temp to ${a.value}°C`;
+        return `${a.type} on Module ${a.module}`;
+      }).join(', ');
+      statusMessages.push(`**Sol ${entry.sol}:** ${summary}`);
+    }
+  }
+  lastFloraLogLen = existingLog.length;
+
   render();
 
   // Trigger initial FLORA scan if mission is running and modules are empty
