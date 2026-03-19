@@ -148,8 +148,8 @@ function createInitialState() {
     resources: {
       water_liters: 5000,
       water_recycling_efficiency: 0.92,
-      energy_kwh_daily: 200,           // peak solar production (at noon, clear sky)
-      energy_stored_kwh: 800,
+      energy_kwh_daily: 500,           // peak solar production (large array, clear sky)
+      energy_stored_kwh: 2000,
       solar_efficiency: 1.0,
       co2_kg: 50,
     },
@@ -425,7 +425,7 @@ function advanceSol(state, days = 1) {
     }
     const totalConsumption = s.energy.led_consumption + s.energy.hvac_consumption + s.energy.systems_consumption + s.energy.crew_consumption;
     s.energy.balance = solarDaily - totalConsumption;
-    s.resources.energy_stored_kwh = Math.max(0, Math.min(1000, s.resources.energy_stored_kwh + s.energy.balance));
+    s.resources.energy_stored_kwh = Math.max(0, Math.min(3000, s.resources.energy_stored_kwh + s.energy.balance));
 
     // ── Water Budget (growth-phase aware) ──
     let totalWaterUse = s.crew.daily_water_need;
