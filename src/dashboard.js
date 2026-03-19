@@ -5,6 +5,7 @@ let state = createInitialState();
 let chatHistory = [];
 let isListening = false;
 let floraState = 'idle'; // idle | listening | thinking | speaking | alert
+let activeTab = null; // null = orb view, 'metrics' | 'module-0' | 'module-1' | 'module-2' | 'harvests'
 
 // ── Voice Server Connection ──────────────────────────────────────────
 const VOICE_WS_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
@@ -319,6 +320,137 @@ function updateAvatar() {
   if (el) el.innerHTML = renderAvatar();
 }
 
+// ── Detail Panel (shown when a sidebar tab is active) ────────────────
+function renderDetailPanel() {
+  if (!activeTab) return '';
+
+  if (activeTab === 'metrics') {
+    const missionPct = Math.round((state.mission.currentSol / state.mission.totalSols) * 100);
+    const waterPct = Math.round((state.resources.water_liters / 5000) * 100);
+    return `
+      <div class="detail-panel">
+        <div class="detail-header">
+          <span class="detail-title">Mission Overview</span>
+          <button class="detail-close" id="detail-close">&times;</button>
+        </div>
+        <div class="detail-grid">
+          <div class="detail-item">
+            <div class="detail-label">Mission Progress</div>
+            <div class="detail-value">${missionPct}%</div>
+            <div class="detail-sub">${state.mission.currentSol} of ${state.mission.totalSols} sols completed</div>
+            ${bar(state.mission.currentSol, state.mission.totalSols, '#1a1a1a')}
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Phase</div>
+            <div class="detail-value">${state.mission.phase}</div>
+            <div class="detail-sub">Crew size: ${state.mission.crew} astronauts</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Nutrition Coverage</div>
+            <div class="detail-value ${state.nutrition.coverage_percent >= 80 ? '' : 'warn'}">${state.nutrition.coverage_percent}%</div>
+            <div class="detail-sub">${state.nutrition.current_daily_kcal} / ${state.nutrition.daily_target_kcal} kcal daily</div>
+            <div class="detail-sub">${state.nutrition.current_daily_protein_g} / ${state.nutrition.daily_target_protein_g}g protein daily</div>
+            ${bar(state.nutrition.coverage_percent, 100, '#1a1a1a')}
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Water Reserve</div>
+            <div class="detail-value ${waterPct > 40 ? '' : waterPct > 20 ? 'warn' : 'crit'}">${Math.round(state.resources.water_liters)}L</div>
+            <div class="detail-sub">Budget: ${state.resources.water_daily_budget}L per sol</div>
+            <div class="detail-sub">Energy: ${state.resources.energy_kwh} kWh</div>
+            <div class="detail-sub">CO₂: ${state.resources.co2_kg} kg</div>
+            ${bar(state.resources.water_liters, 5000, '#1a1a1a')}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  if (activeTab === 'harvests') {
+    return `
+      <div class="detail-panel">
+        <div class="detail-header">
+          <span class="detail-title">Harvest Log</span>
+          <button class="detail-close" id="detail-close">&times;</button>
+        </div>
+        <div class="detail-list">
+          ${state.harvests.length === 0 ? '<div class="detail-empty">No harvests recorded yet</div>' :
+            state.harvests.slice().reverse().map(h => `
+              <div class="detail-row">
+                <span class="detail-row-label">Sol ${h.sol}</span>
+                <span>${h.crop}</span>
+                <span class="detail-row-value">${h.yield_kg} kg</span>
+                <span class="detail-row-sub">Module ${h.module}</span>
+              </div>
+            `).join('')}
+        </div>
+      </div>`;
+  }
+
+  const moduleMatch = activeTab.match(/^module-(\d+)$/);
+  if (moduleMatch) {
+    const m = state.modules[parseInt(moduleMatch[1])];
+    if (!m) return '';
+    const used = m.crops.reduce((s, c) => s + c.area_m2, 0);
+    return `
+      <div class="detail-panel">
+        <div class="detail-header">
+          <span class="detail-title">${m.name}</span>
+          <button class="detail-close" id="detail-close">&times;</button>
+        </div>
+        <div class="detail-grid">
+          <div class="detail-item">
+            <div class="detail-label">Area</div>
+            <div class="detail-value">${used} / ${m.area_m2} m²</div>
+            ${bar(used, m.area_m2, '#1a1a1a')}
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Temperature</div>
+            <div class="detail-value">${m.temp}°C</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Humidity</div>
+            <div class="detail-value">${m.humidity}%</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Light</div>
+            <div class="detail-value">${m.light} µmol/m²/s</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">CO₂</div>
+            <div class="detail-value">${m.co2} ppm</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Crops</div>
+            <div class="detail-value">${m.crops.length}</div>
+          </div>
+        </div>
+        ${m.crops.length > 0 ? `
+        <div class="detail-crops">
+          ${m.crops.map(c => {
+            const info = CROP_DB[c.type];
+            const pct = Math.round((c.daysGrown / info.cycle) * 100);
+            const daysLeft = info.cycle - c.daysGrown;
+            return `
+            <div class="detail-crop">
+              <div class="detail-crop-header">
+                <span class="detail-crop-name">${info.name}</span>
+                <span class="detail-crop-pct">${pct}%</span>
+              </div>
+              ${bar(c.daysGrown, info.cycle, '#1a1a1a')}
+              <div class="detail-crop-meta">
+                ${c.area_m2} m² &middot; ${daysLeft} days to harvest &middot; ${info.role}
+              </div>
+              <div class="detail-crop-meta">
+                Planted Sol ${c.plantedSol} &middot; Cycle: ${info.cycle}d &middot; Yield: ${info.yield_kg_m2} kg/m²
+              </div>
+            </div>`;
+          }).join('')}
+        </div>` : '<div class="detail-empty">No crops planted in this module</div>'}
+      </div>`;
+  }
+
+  return '';
+}
+
 // ── Render Dashboard ─────────────────────────────────────────────────
 function render() {
   const d = document.getElementById('dashboard');
@@ -339,7 +471,7 @@ function render() {
           <span class="d-sol">SOL ${state.mission.currentSol}<span class="d-sol-total">/${state.mission.totalSols}</span></span>
         </div>
 
-        <div class="d-sidebar-section">
+        <div class="d-sidebar-tab ${activeTab === 'metrics' ? 'active' : ''}" data-tab="metrics">
           <div class="d-metric">
             <div class="d-metric-head"><span class="d-metric-label">Mission</span><span class="d-metric-value">${missionPct}%</span></div>
             ${bar(state.mission.currentSol, state.mission.totalSols, '#1a1a1a')}
@@ -347,41 +479,35 @@ function render() {
           <div class="d-metric">
             <div class="d-metric-head"><span class="d-metric-label">Nutrition</span><span class="d-metric-value ${state.nutrition.coverage_percent >= 80 ? '' : state.nutrition.coverage_percent >= 50 ? 'warn' : 'crit'}">${state.nutrition.coverage_percent}%</span></div>
             ${bar(state.nutrition.coverage_percent, 100, state.nutrition.coverage_percent >= 80 ? '#1a1a1a' : state.nutrition.coverage_percent >= 50 ? '#92400e' : '#991b1b')}
-            <div class="d-metric-detail">${state.nutrition.current_daily_kcal} / ${state.nutrition.daily_target_kcal} kcal</div>
           </div>
           <div class="d-metric">
             <div class="d-metric-head"><span class="d-metric-label">Water</span><span class="d-metric-value ${waterPct > 40 ? '' : waterPct > 20 ? 'warn' : 'crit'}">${Math.round(state.resources.water_liters)}L</span></div>
-            ${bar(state.resources.water_liters, 5000, waterPct > 40 ? '#1a1a1a' : waterPct > 20 ? '#92400e' : '#991b1b')}
           </div>
           <div class="d-metric">
             <div class="d-metric-head"><span class="d-metric-label">Area</span><span class="d-metric-value">${usedArea}/${totalArea}m²</span></div>
-            ${bar(usedArea, totalArea, '#1a1a1a')}
           </div>
         </div>
 
-        ${state.modules.map(m => {
+        ${state.modules.map((m, i) => {
           const used = m.crops.reduce((s, c) => s + c.area_m2, 0);
           return `
-          <div class="d-sidebar-section">
+          <div class="d-sidebar-tab ${activeTab === 'module-' + i ? 'active' : ''}" data-tab="module-${i}">
             <div class="d-module-header">
               <span class="d-module-name">${m.name}</span>
               <span class="d-module-area">${used}/${m.area_m2}m²</span>
             </div>
-            <div class="d-module-env">${m.temp}°C &middot; ${m.humidity}% &middot; ${m.light}µmol</div>
-            ${m.crops.length === 0 ? '<div class="d-crop-empty">no crops</div>' :
-              m.crops.map(c => {
-                const info = CROP_DB[c.type];
-                const pct = Math.round((c.daysGrown / info.cycle) * 100);
-                return `<div class="d-crop">
-                  <div class="d-crop-top"><span class="d-crop-name">${info.name}</span><span class="d-crop-pct">${pct}%</span></div>
-                  ${bar(c.daysGrown, info.cycle, '#1a1a1a')}
-                </div>`;
-              }).join('')}
+            <div class="d-module-env">${m.temp}°C &middot; ${m.crops.length} crop${m.crops.length !== 1 ? 's' : ''}</div>
           </div>`;
         }).join('')}
 
-        ${state.alerts.length > 0 ? `<div class="d-sidebar-section d-sidebar-alert">${state.alerts.map(a =>
-          `<div class="d-alert">Sol ${a.sol} — ${a.message}</div>`).join('')}</div>` : ''}
+        ${state.harvests.length > 0 ? `<div class="d-sidebar-tab ${activeTab === 'harvests' ? 'active' : ''}" data-tab="harvests">
+          <div class="d-module-name">Harvests</div>
+          <div class="d-module-env">${state.harvests.length} recorded</div>
+        </div>` : ''}
+
+        ${state.alerts.length > 0 ? `<div class="d-sidebar-tab d-sidebar-alert" data-tab="alerts">
+          ${state.alerts.map(a => `<div class="d-alert">Sol ${a.sol} — ${a.message}</div>`).join('')}
+        </div>` : ''}
 
         <div class="d-sidebar-footer">
           <button class="d-btn" id="btn-a1">+1 Sol</button>
@@ -390,9 +516,12 @@ function render() {
         </div>
       </aside>
 
-      <!-- Center: FLORA orb hero + chat -->
+      <!-- Center: FLORA orb OR detail panel + chat -->
       <main class="d-center">
-        <div id="flora-avatar" class="flora-avatar-section">${renderAvatar()}</div>
+        ${activeTab
+          ? renderDetailPanel()
+          : `<div id="flora-avatar" class="flora-avatar-section">${renderAvatar()}</div>`
+        }
         <div class="d-messages" id="d-messages">
           <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Crop planning, resource optimization, and emergency response ready.</div></div>
         </div>
@@ -416,6 +545,19 @@ function render() {
   document.getElementById('d-input').onkeydown = (e) => {
     if (e.key === 'Enter') { const v = e.target.value.trim(); if (v) { e.target.value = ''; handleSend(v); } }
   };
+
+  // Tab click handlers
+  document.querySelectorAll('.d-sidebar-tab').forEach(tab => {
+    tab.onclick = () => {
+      const t = tab.dataset.tab;
+      activeTab = (activeTab === t) ? null : t; // toggle
+      render();
+    };
+  });
+
+  // Detail close button
+  const closeBtn = document.getElementById('detail-close');
+  if (closeBtn) closeBtn.onclick = () => { activeTab = null; render(); };
 }
 
 // ── Chat Handler ─────────────────────────────────────────────────────
@@ -509,12 +651,64 @@ html,body,#dashboard {
 .d-sol { font-family:var(--mono);font-size:0.75rem;font-weight:500;letter-spacing:0.04em; }
 .d-sol-total { color:var(--text3);font-weight:300; }
 
-.d-sidebar-section {
-  padding:14px 18px;
+.d-sidebar-tab {
+  padding:12px 18px;
   border-bottom:1px solid var(--border-light);
-  display:flex;flex-direction:column;gap:8px;
+  display:flex;flex-direction:column;gap:6px;
+  cursor:pointer;
+  transition:background 0.15s;
 }
-.d-sidebar-alert { border-color:var(--crit); }
+.d-sidebar-tab:hover { background:var(--border-light); }
+.d-sidebar-tab.active { background:var(--bg);border-left:2px solid var(--text); }
+.d-sidebar-alert { border-color:var(--crit);cursor:default; }
+.d-sidebar-alert:hover { background:transparent; }
+
+/* ── Detail Panel ── */
+.detail-panel {
+  padding:24px 28px;
+  border-bottom:1px solid var(--border);
+  overflow-y:auto;
+  flex-shrink:0;
+  max-height:50vh;
+}
+.detail-header {
+  display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:20px;
+}
+.detail-title { font-family:var(--serif);font-size:1.3rem; }
+.detail-close {
+  border:1px solid var(--border);background:transparent;
+  color:var(--text2);font-size:1rem;width:28px;height:28px;
+  cursor:pointer;font-family:var(--sans);display:flex;align-items:center;justify-content:center;
+}
+.detail-close:hover { background:var(--border-light);color:var(--text); }
+.detail-grid {
+  display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
+  background:var(--border);border:1px solid var(--border);
+  margin-bottom:16px;
+}
+.detail-item { background:var(--surface);padding:14px 16px; }
+.detail-label { font-family:var(--mono);font-size:0.58rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text2);margin-bottom:4px; }
+.detail-value { font-family:var(--mono);font-size:1rem;font-weight:500;margin-bottom:4px; }
+.detail-value.warn { color:var(--warn); }
+.detail-value.crit { color:var(--crit); }
+.detail-sub { font-family:var(--mono);font-size:0.55rem;color:var(--text3);margin-top:2px; }
+.detail-crops { display:flex;flex-direction:column;gap:1px;background:var(--border);border:1px solid var(--border); }
+.detail-crop { background:var(--surface);padding:12px 16px; }
+.detail-crop-header { display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px; }
+.detail-crop-name { font-size:0.82rem;font-weight:500; }
+.detail-crop-pct { font-family:var(--mono);font-size:0.72rem;color:var(--text2); }
+.detail-crop-meta { font-family:var(--mono);font-size:0.55rem;color:var(--text3);margin-top:4px; }
+.detail-empty { font-family:var(--mono);font-size:0.65rem;color:var(--text3);padding:20px 0;text-align:center; }
+.detail-list { display:flex;flex-direction:column; }
+.detail-row {
+  display:flex;gap:12px;align-items:baseline;
+  padding:6px 0;border-bottom:1px solid var(--border-light);
+  font-size:0.72rem;
+}
+.detail-row-label { font-family:var(--mono);font-size:0.62rem;color:var(--text2);min-width:50px; }
+.detail-row-value { font-family:var(--mono);font-weight:500;margin-left:auto; }
+.detail-row-sub { font-family:var(--mono);font-size:0.55rem;color:var(--text3); }
 .d-sidebar-footer {
   padding:14px 18px;
   margin-top:auto;
