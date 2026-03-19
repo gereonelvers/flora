@@ -1253,7 +1253,6 @@ function render() {
     </div>
     <div class="flora-fab ${chatOpen ? 'flora-fab-hidden' : ''} ${isListening ? 'flora-fab-active' : ''} ${floraRunning ? 'flora-fab-thinking' : ''}" id="flora-fab">
       <div id="flora-fab-orb">${renderAvatar()}</div>
-      ${floraRunning ? '<div class="flora-fab-label">Thinking...</div>' : ''}
     </div>`;
 
   // Wire events
