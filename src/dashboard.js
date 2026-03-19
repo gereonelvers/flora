@@ -2123,30 +2123,33 @@ setInterval(async () => {
     state.mission.solFractionUpdatedAt = saved.mission.solFractionUpdatedAt;
     state.mission.simSpeed = saved.mission.simSpeed;
   }
-  // Compare ignoring frequently-changing fields to avoid constant re-renders
-  const strip = (s) => { const c = {...s, mission: {...s.mission}}; delete c.mission.solFraction; delete c.mission.solFractionUpdatedAt; delete c.mission.simSpeed; delete c.mission.currentSol; delete c.mission.phase; return JSON.stringify(c); };
   const prevSol = state.mission.currentSol;
+  const wasStarted = state.mission?.started;
   // Preserve started flag — never regress from true to false via polling
-  if (state.mission?.started && !saved.mission?.started) {
+  if (wasStarted && !saved.mission?.started) {
     saved.mission.started = true;
   }
-  const needsFullRender = strip(saved) !== strip(state);
+  // Detect if simulation was just started or reset
+  const justStarted = !wasStarted && saved.mission?.started;
+  const justReset = saved.mission.currentSol < prevSol;
   state = saved;
 
-  if (saved.mission.currentSol < prevSol) {
+  if (justReset) {
     window.__flora3d?.resetSolFraction?.();
   }
 
-  if (needsFullRender) {
+  // Only full render on start/reset — otherwise just patch the lightweight elements
+  if (justStarted || justReset) {
     render();
-    checkFloraLog(); // pick up background FLORA actions
-  } else if (saved.mission.currentSol !== prevSol) {
-    // Lightweight update — just patch the sol counter and progress bar
+  } else {
+    // Lightweight DOM patches
     const solEl = document.querySelector('.d-topbar-sol');
     if (solEl) solEl.textContent = `SOL ${state.mission.currentSol} / ${state.mission.totalSols} · ${state.mission.phase}`;
     const fillEl = document.querySelector('.d-topbar-fill');
     if (fillEl) fillEl.style.width = `${Math.round((state.mission.currentSol / state.mission.totalSols) * 100)}%`;
   }
+
+  checkFloraLog();
 
   // Check if FLORA should run after sol change
   if (state.mission.started && saved.mission.currentSol > prevSol) {
