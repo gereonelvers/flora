@@ -2067,31 +2067,49 @@ setInterval(() => {
 setInterval(async () => {
   if (suppressPoll) return;
   const saved = await loadState();
-  if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
-    const prevSol = state.mission.currentSol;
-    // Preserve started flag — never regress from true to false via polling
-    if (state.mission?.started && !saved.mission?.started) {
-      saved.mission.started = true;
-    }
-    state = saved;
-    if (saved.mission.currentSol < prevSol) {
-      window.__flora3d?.resetSolFraction?.();
-    }
+  if (!saved) return;
+  // Always sync time fields silently (3D view updates these every 2s)
+  if (saved.mission) {
+    state.mission.solFraction = saved.mission.solFraction;
+    state.mission.solFractionUpdatedAt = saved.mission.solFractionUpdatedAt;
+    state.mission.simSpeed = saved.mission.simSpeed;
+  }
+  // Compare ignoring frequently-changing fields to avoid constant re-renders
+  const strip = (s) => { const c = {...s, mission: {...s.mission}}; delete c.mission.solFraction; delete c.mission.solFractionUpdatedAt; delete c.mission.simSpeed; delete c.mission.currentSol; delete c.mission.phase; return JSON.stringify(c); };
+  const prevSol = state.mission.currentSol;
+  // Preserve started flag — never regress from true to false via polling
+  if (state.mission?.started && !saved.mission?.started) {
+    saved.mission.started = true;
+  }
+  const needsFullRender = strip(saved) !== strip(state);
+  state = saved;
+
+  if (saved.mission.currentSol < prevSol) {
+    window.__flora3d?.resetSolFraction?.();
+  }
+
+  if (needsFullRender) {
     render();
     checkFloraLog(); // pick up background FLORA actions
+  } else if (saved.mission.currentSol !== prevSol) {
+    // Lightweight update — just patch the sol counter and progress bar
+    const solEl = document.querySelector('.d-topbar-sol');
+    if (solEl) solEl.textContent = `SOL ${state.mission.currentSol} / ${state.mission.totalSols} · ${state.mission.phase}`;
+    const fillEl = document.querySelector('.d-topbar-fill');
+    if (fillEl) fillEl.style.width = `${Math.round((state.mission.currentSol / state.mission.totalSols) * 100)}%`;
+  }
 
-    // Check if FLORA should run after sol change
-    if (state.mission.started && saved.mission.currentSol > prevSol) {
-      const nextCheck = state.floraNextCheckSol || (lastAnalysisSol + 5);
-      const scheduledWake = state.mission.currentSol >= nextCheck;
-      const crewStarving = (state.crew?.members || []).some(m => m.alive && m.daysWithoutFood > 0);
-      const emptyOnline = state.modules.some(m =>
-        (!m.onlineSol || state.mission.currentSol >= m.onlineSol) && m.crops.length === 0
-      );
-      if (!floraRunning && (crewStarving || emptyOnline || scheduledWake)) {
-        lastAnalysisSol = state.mission.currentSol;
-        runFloraAutonomous();
-      }
+  // Check if FLORA should run after sol change
+  if (state.mission.started && saved.mission.currentSol > prevSol) {
+    const nextCheck = state.floraNextCheckSol || (lastAnalysisSol + 5);
+    const scheduledWake = state.mission.currentSol >= nextCheck;
+    const crewStarving = (state.crew?.members || []).some(m => m.alive && m.daysWithoutFood > 0);
+    const emptyOnline = state.modules.some(m =>
+      (!m.onlineSol || state.mission.currentSol >= m.onlineSol) && m.crops.length === 0
+    );
+    if (!floraRunning && (crewStarving || emptyOnline || scheduledWake)) {
+      lastAnalysisSol = state.mission.currentSol;
+      runFloraAutonomous();
     }
   }
 }, 3000);
