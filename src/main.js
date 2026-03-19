@@ -78,25 +78,20 @@ async function writeToServer() {
   if (writeInProgress) return;
   writeInProgress = true;
   try {
-    // Fetch latest server state so we don't overwrite dashboard's simSpeed
+    // Read simSpeed from server (dashboard on another device may have changed it)
     const res = await fetch(STATE_API);
-    if (!res.ok) return;
-    const latest = await res.json();
-    if (!latest?.mission) return;
-
-    // Sync simSpeed FROM server (dashboard may have changed it)
-    if (latest.mission.simSpeed != null) simSpeed = latest.mission.simSpeed;
-
-    // Only write our time fields
-    latest.mission.solFraction = solFraction;
-    latest.mission.solFractionUpdatedAt = Date.now();
-
-    // Update local state and persist
-    if (window.__floraUI?.saveState) {
-      window.__floraUI.saveState(latest);
-    } else {
-      fetch(STATE_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(latest) }).catch(() => {});
+    if (res.ok) {
+      const serverState = await res.json();
+      if (serverState?.mission?.simSpeed != null) simSpeed = serverState.mission.simSpeed;
     }
+
+    // Write LOCAL state (which has the correct currentSol) with updated time fields
+    const s = window.__floraUI?.getState?.();
+    if (!s?.mission) return;
+    s.mission.simSpeed = simSpeed;
+    s.mission.solFraction = solFraction;
+    s.mission.solFractionUpdatedAt = Date.now();
+    window.__floraUI?.saveState?.(s);
   } catch {} finally {
     writeInProgress = false;
   }
