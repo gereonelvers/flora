@@ -133,10 +133,16 @@ export function initUI() {
   setInterval(async () => {
     if (uiSuppressPoll) return;
     const saved = await loadState();
-    if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
-      state = saved;
-      updateHUD();
+    if (!saved) return;
+    // Never let currentSol regress — local advancement may be ahead of server
+    if (saved.mission.currentSol < state.mission.currentSol) {
+      saved.mission.currentSol = state.mission.currentSol;
     }
+    if (state.mission?.started && !saved.mission?.started) {
+      saved.mission.started = true;
+    }
+    state = saved;
+    updateHUD();
   }, 3000);
 
   updateHUD();
