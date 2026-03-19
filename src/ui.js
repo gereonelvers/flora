@@ -37,6 +37,7 @@ export function initUI() {
     <div class="hud-header">
       <span class="hud-label">MISSION STATUS</span>
       <span class="hud-sol" id="hud-sol">SOL 1 / 450</span>
+      <span class="hud-clock" id="hud-clock">06:00</span>
     </div>
     <div class="hud-actions">
       <button id="btn-speed-0" class="hud-btn hud-speed-btn">⏸</button>
@@ -238,6 +239,7 @@ const UI_STYLES = `
 .hud-header { display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px; }
 .hud-label { font-family:'DM Mono',monospace;font-size:0.58rem;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.45); }
 .hud-sol { font-family:'DM Mono',monospace;font-size:0.75rem;font-weight:500; }
+.hud-clock { font-family:'DM Mono',monospace;font-size:0.75rem;font-weight:500;color:rgba(255,255,255,0.5); }
 .hud-speed-btn.active { background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.95);border-color:rgba(255,255,255,0.25); }
 .hud-actions { display:flex;gap:4px;flex-wrap:wrap; }
 .hud-btn {
