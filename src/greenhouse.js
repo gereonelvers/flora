@@ -178,8 +178,10 @@ function cropStressFactor(crop, mod) {
   return Math.max(0, Math.min(1.2, stress));
 }
 
-// ── Proactive AI Agent Logic ─────────────────────────────────────────
-function runProactiveAgent(s) {
+// ── Safety Overrides (fast, rule-based, prevent immediate damage) ────
+// The real AI agent (Claude on Bedrock) runs async via the dashboard.
+// These are instant safety systems that can't wait for an API call.
+function runSafetyOverrides(s) {
   const actions = [];
 
   for (const mod of s.modules) {
@@ -407,7 +409,7 @@ function advanceSol(state, days = 1) {
     }
 
     // ── Run Proactive Agent ──
-    runProactiveAgent(s);
+    runSafetyOverrides(s);
 
     // ── Alerts cleanup (keep last 20) ──
     if (s.alerts.length > 20) s.alerts = s.alerts.slice(-20);

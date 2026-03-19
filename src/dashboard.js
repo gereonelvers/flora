@@ -1,4 +1,4 @@
-import { sendToAgent, parseActions } from './agent-client.js';
+import { sendToAgent, parseActions, runProactiveAnalysis } from './agent-client.js';
 import { createInitialState, advanceSol, applyActions, plantCrop, saveState, loadState, resetState, CROP_DB } from './greenhouse.js';
 
 let state = createInitialState(); // overwritten by async init below
@@ -566,6 +566,64 @@ function renderDetailPanel() {
   return '';
 }
 
+// ── Sol Advance + Proactive AI ───────────────────────────────────────
+let lastAnalysisSol = 0;
+
+function advanceAndAnalyze(days) {
+  const prevEvents = (state.events || []).length;
+  state = advanceSol(state, days);
+  saveState(state);
+  render();
+
+  // Trigger proactive AI analysis if:
+  // - new events appeared
+  // - nutrition dropped below threshold
+  // - enough sols passed since last analysis (every 10 sols)
+  // - energy crisis
+  const hasNewEvents = (state.events || []).length > prevEvents;
+  const nutritionCritical = state.nutrition.coverage_percent < 60;
+  const energyCrisis = (state.energy?.balance || 0) < -20;
+  const solsSinceAnalysis = state.mission.currentSol - lastAnalysisSol;
+
+  if (hasNewEvents || nutritionCritical || energyCrisis || solsSinceAnalysis >= 10) {
+    lastAnalysisSol = state.mission.currentSol;
+    triggerProactiveAgent();
+  }
+}
+
+async function triggerProactiveAgent() {
+  setFloraState('thinking');
+  appendChatMsg(`[Proactive scan — Sol ${state.mission.currentSol}]`, 'system');
+
+  const response = await runProactiveAnalysis(state);
+  if (!response) {
+    setFloraState('idle');
+    return;
+  }
+
+  appendChatMsg(response, 'agent');
+  setFloraState('idle');
+
+  // Check for executable actions
+  const actions = parseActions(response);
+  if (actions.length > 0) {
+    const msgs = document.getElementById('d-messages');
+    if (msgs) {
+      const id = 'proactive-' + Date.now();
+      msgs.innerHTML += `<div class="d-msg d-msg-action" id="${id}"><div class="d-msg-text">
+        <strong>FLORA recommends ${actions.length} action(s)</strong>
+        <button class="d-btn d-btn-apply" id="${id}-btn">Apply</button>
+      </div></div>`;
+      msgs.scrollTop = msgs.scrollHeight;
+      document.getElementById(`${id}-btn`).onclick = () => {
+        state = applyActions(state, actions);
+        saveState(state);
+        render();
+      };
+    }
+  }
+}
+
 // ── Render Dashboard ─────────────────────────────────────────────────
 function render() {
   const d = document.getElementById('dashboard');
@@ -659,9 +717,9 @@ function render() {
     </div>`;
 
   // Wire events
-  document.getElementById('btn-a1').onclick = () => { state = advanceSol(state, 1); saveState(state); render(); };
-  document.getElementById('btn-a10').onclick = () => { state = advanceSol(state, 10); saveState(state); render(); };
-  document.getElementById('btn-a30').onclick = () => { state = advanceSol(state, 30); saveState(state); render(); };
+  document.getElementById('btn-a1').onclick = () => advanceAndAnalyze(1);
+  document.getElementById('btn-a10').onclick = () => advanceAndAnalyze(10);
+  document.getElementById('btn-a30').onclick = () => advanceAndAnalyze(30);
   document.getElementById('d-mic').onclick = () => isListening ? stopListening() : startListening();
   document.getElementById('d-send').onclick = () => {
     const v = document.getElementById('d-input').value.trim();
