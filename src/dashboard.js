@@ -173,21 +173,32 @@ function appendSystemMsg(text) {
 }
 
 function appendChatMsg(text, role) {
+  // Filter out stale "analyzing" system messages when real content arrives
+  if (role === 'agent') {
+    chatMessages = chatMessages.filter(m =>
+      !(m.role === 'system' && (m.text.includes('analyzing') || m.text.includes('running in background')))
+    );
+  }
   chatMessages.push({ text, role });
   if (chatMessages.length > 50) chatMessages = chatMessages.slice(-50);
   // Update DOM if it exists
   const msgs = document.getElementById('d-messages');
   if (!msgs) return;
-  const cls = role === 'user' ? 'd-msg-user' : role === 'system' ? 'd-msg-system' : 'd-msg-agent';
-  msgs.innerHTML += `<div class="d-msg ${cls}"><div class="d-msg-text">${md(text)}</div></div>`;
-  msgs.scrollTop = msgs.scrollHeight;
+  // Re-render all messages to reflect filtered list
+  msgs.querySelector('.d-chat-messages').innerHTML = renderChatMessagesInner();
+  const isNearBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+  if (isNearBottom) msgs.scrollTop = msgs.scrollHeight;
 }
 
-function renderChatMessages() {
+function renderChatMessagesInner() {
   return chatMessages.map(m => {
     const cls = m.role === 'user' ? 'd-msg-user' : m.role === 'system' ? 'd-msg-system' : 'd-msg-agent';
     return `<div class="d-msg ${cls}"><div class="d-msg-text">${md(m.text)}</div></div>`;
   }).join('');
+}
+
+function renderChatMessages() {
+  return `<div class="d-chat-messages">${renderChatMessagesInner()}</div>`;
 }
 
 // ── Mic Audio Capture (PCM 16kHz → base64 → WebSocket) ──────────────
@@ -880,28 +891,33 @@ async function runFloraAutonomous() {
   if (floraRunning) return;
   floraRunning = true;
   setFloraState('thinking');
-  appendChatMsg(`[FLORA autonomous scan — Sol ${state.mission.currentSol}]`, 'system');
 
   try {
-    // Fire-and-forget: Lambda applies actions server-side even if HTTP times out
     const result = await runAutonomousScan(state);
 
     if (result && result.autoActions.length > 0) {
-      // If response came back in time, also apply client-side for instant feedback
       state = applyActions(state, result.autoActions);
       saveState(state);
     }
 
     if (result?.summary) {
-      appendChatMsg(result.summary, 'agent');
-    } else {
-      appendChatMsg('FLORA is analyzing the greenhouse state...', 'system');
+      // Short summaries go to chat, long ones just show a brief note
+      const clean = result.summary.replace(/---[\s\S]*/g, '').trim();
+      if (clean.length > 0 && clean.length < 300) {
+        appendChatMsg(clean, 'agent');
+      } else if (result.autoActions?.length > 0) {
+        const brief = result.autoActions.map(a => {
+          if (a.type === 'plant') return `Planted ${a.crop}`;
+          if (a.type === 'adjust_temperature') return `Adjusted temp in ${a.module}`;
+          return a.type;
+        }).join(', ');
+        appendChatMsg(`Sol ${state.mission.currentSol}: ${brief}`, 'agent');
+      }
     }
 
     setFloraState('idle');
     render();
   } catch (err) {
-    appendChatMsg('FLORA analysis running in background...', 'system');
     setFloraState('idle');
   }
 
@@ -1181,15 +1197,24 @@ function render() {
       </div>
       ${floraRunning ? '<div class="flora-status-bar"><span class="flora-status-dot"></span> Analyzing greenhouse state via knowledge base...</div>' : ''}
       <div class="d-messages" id="d-messages">
-        <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Autonomous greenhouse management active.</div></div>
-        ${(state.floraJournal || []).map(j => `
-          <div class="d-msg d-msg-journal">
-            <div class="d-msg-text">
-              <div class="journal-header">Sol ${j.sol}${j.next_check ? ` · next scan: Sol ${j.next_check}` : ''}</div>
-              ${j.entry}
-            </div>
+        ${(state.floraJournal || []).length > 0 ? `
+        <div class="d-journal-section">
+          <div class="d-journal-toggle" id="d-journal-toggle">
+            <span>Journal</span>
+            <span class="d-journal-count">${(state.floraJournal || []).length} entries</span>
           </div>
-        `).join('')}
+          <div class="d-journal-list" id="d-journal-list">
+            ${(state.floraJournal || []).slice().reverse().map(j => `
+              <div class="d-msg d-msg-journal">
+                <div class="d-msg-text">
+                  <div class="journal-header">Sol ${j.sol}${j.next_check ? ` · next scan: Sol ${j.next_check}` : ''}</div>
+                  ${j.entry}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>` : ''}
+        <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Autonomous greenhouse management active.</div></div>
         ${renderChatMessages()}
       </div>
       <div class="d-input-area">
@@ -1223,6 +1248,17 @@ function render() {
   document.getElementById('d-input').onkeydown = (e) => {
     if (e.key === 'Enter') { const v = e.target.value.trim(); if (v) { e.target.value = ''; handleSend(v); } }
   };
+
+  // Journal toggle
+  const journalToggle = document.getElementById('d-journal-toggle');
+  const journalList = document.getElementById('d-journal-list');
+  if (journalToggle && journalList) {
+    journalToggle.onclick = () => journalList.classList.toggle('open');
+  }
+
+  // Scroll chat to bottom after render
+  const msgsEl = document.getElementById('d-messages');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
 
   // Logo → back to metrics
   document.getElementById('logo-home').onclick = () => { activeTab = 'metrics'; render(); };
@@ -1303,19 +1339,23 @@ function render() {
 
 // ── Chat Handler ─────────────────────────────────────────────────────
 async function handleSend(text) {
-  const msgs = document.getElementById('d-messages');
-  msgs.innerHTML += `<div class="d-msg d-msg-user"><div class="d-msg-text">${md(text)}</div></div>`;
-  msgs.innerHTML += `<div class="d-msg d-msg-loading" id="d-loading"><div class="d-msg-text"><span class="d-dots">...</span></div></div>`;
-  msgs.scrollTop = msgs.scrollHeight;
-
+  appendChatMsg(text, 'user');
   chatHistory.push({ role: 'user', content: text });
   setFloraState('thinking');
+
+  // Show loading indicator in DOM (not persisted)
+  const msgs = document.getElementById('d-messages');
+  const chatEl = msgs?.querySelector('.d-chat-messages');
+  if (chatEl) {
+    chatEl.innerHTML += `<div class="d-msg d-msg-loading" id="d-loading"><div class="d-msg-text"><span class="d-dots">...</span></div></div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+  }
 
   try {
     const response = await sendToAgent(chatHistory, state);
     chatHistory.push({ role: 'assistant', content: response });
     document.getElementById('d-loading')?.remove();
-    msgs.innerHTML += `<div class="d-msg d-msg-agent"><div class="d-msg-text">${md(response)}</div></div>`;
+    appendChatMsg(response, 'agent');
 
     speak(response);
     if (voiceSocket?.readyState === WebSocket.OPEN) setFloraState('idle');
@@ -1323,20 +1363,22 @@ async function handleSend(text) {
     const actions = parseActions(response);
     if (actions.length > 0) {
       const id = 'act-' + Date.now();
-      msgs.innerHTML += `<div class="d-msg d-msg-action" id="${id}"><div class="d-msg-text">
-        <strong>${actions.length} action(s) recommended</strong>
-        <button class="d-btn d-btn-apply" id="${id}-btn">Apply</button>
-      </div></div>`;
-      document.getElementById(`${id}-btn`).onclick = () => {
-        state = applyActions(state, actions);
-        saveState(state);
-        render();
-      };
+      const chatEl2 = document.getElementById('d-messages')?.querySelector('.d-chat-messages');
+      if (chatEl2) {
+        chatEl2.innerHTML += `<div class="d-msg d-msg-action" id="${id}"><div class="d-msg-text">
+          <strong>${actions.length} action(s) recommended</strong>
+          <button class="d-btn d-btn-apply" id="${id}-btn">Apply</button>
+        </div></div>`;
+        document.getElementById(`${id}-btn`).onclick = () => {
+          state = applyActions(state, actions);
+          saveState(state);
+          render();
+        };
+      }
     }
-    msgs.scrollTop = msgs.scrollHeight;
   } catch (err) {
     document.getElementById('d-loading')?.remove();
-    msgs.innerHTML += `<div class="d-msg d-msg-error"><div class="d-msg-text">Error: ${err.message}</div></div>`;
+    appendChatMsg(`Error: ${err.message}`, 'system');
     chatHistory.pop();
     setFloraState('alert');
   }
@@ -1856,7 +1898,25 @@ html,body,#dashboard {
   margin-right:4px;border:1px solid transparent;
 }
 
-/* ── FLORA journal entries ── */
+/* ── FLORA journal section ── */
+.d-journal-section {
+  width:100%;margin-bottom:4px;
+}
+.d-journal-toggle {
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 14px;cursor:pointer;
+  border:1px solid var(--border);border-radius:6px;
+  font-family:var(--mono);font-size:0.6rem;font-weight:500;
+  text-transform:uppercase;letter-spacing:0.08em;color:var(--text2);
+  transition:background 0.15s;
+}
+.d-journal-toggle:hover { background:var(--border-light); }
+.d-journal-count { font-size:0.52rem;color:var(--text3); }
+.d-journal-list {
+  max-height:0;overflow:hidden;transition:max-height 0.3s ease;
+  display:flex;flex-direction:column;gap:6px;
+}
+.d-journal-list.open { max-height:400px;overflow-y:auto;padding-top:8px; }
 .d-msg-journal .d-msg-text {
   background:transparent;border:1px solid var(--border-light);border-left:2px solid var(--text2);
   padding:8px 14px;font-size:0.72rem;line-height:1.5;

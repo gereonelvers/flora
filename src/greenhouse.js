@@ -176,10 +176,10 @@ function createInitialState() {
       daily_kcal_need: CREW.size * CREW.kcal_per_person_day,
       daily_protein_need: CREW.size * CREW.protein_per_person_day,
       members: [
+        { name: 'Cmdr. Jeff Rowe', role: 'Chief Agronomist & Mission Lead', kcal_need: 2800, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/rowe.png' },
         { name: 'Cmdr. Jeff Bezos', role: 'Mission Commander', kcal_need: 2400, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/bezos.png' },
         { name: 'Dr. Jeff Goldblum', role: 'Flight Surgeon', kcal_need: 2600, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/goldblum.png' },
         { name: 'Dr. Jeff Bridges', role: 'Botanist', kcal_need: 2200, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/bridges.png' },
-        { name: 'Sgt. Jeff Rowe', role: 'Engineer', kcal_need: 2800, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/rowe.png' },
       ],
     },
     genetics: {
@@ -502,10 +502,10 @@ function advanceSol(state, days = 1) {
     // Initialize crew members if missing (old saves)
     if (!s.crew.members) {
       s.crew.members = [
+        { name: 'Cmdr. Jeff Rowe', role: 'Chief Agronomist & Mission Lead', kcal_need: 2800, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/rowe.png' },
         { name: 'Cmdr. Jeff Bezos', role: 'Mission Commander', kcal_need: 2400, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/bezos.png' },
         { name: 'Dr. Jeff Goldblum', role: 'Flight Surgeon', kcal_need: 2600, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/goldblum.png' },
         { name: 'Dr. Jeff Bridges', role: 'Botanist', kcal_need: 2200, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/bridges.png' },
-        { name: 'Sgt. Jeff Rowe', role: 'Engineer', kcal_need: 2800, health: 100, daysWithoutFood: 0, alive: true, photo: '/crew/rowe.png' },
       ];
     }
 
