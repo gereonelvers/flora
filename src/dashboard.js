@@ -372,6 +372,9 @@ function renderAvatar() {
       <div class="flora-ring" style="animation-duration:${s.ringSpeed}s">
         <div class="flora-ring-dot" style="background:${s.stateColor}"></div>
       </div>
+      <div class="flora-ring flora-ring-2" style="animation-duration:${s.ringSpeed * 2.5}s">
+        <div class="flora-ring-dot flora-ring-dot-2" style="background:${s.stateColor}"></div>
+      </div>
     </div>`;
 }
 
@@ -1725,6 +1728,14 @@ html,body,#dashboard {
 .flora-ring-dot {
   position:absolute;top:-2px;left:50%;width:4px;height:4px;margin-left:-2px;
   border-radius:50%;transition:background 0.6s;
+}
+.flora-ring-2 {
+  inset:-12px;
+  border:1px solid var(--border-light);
+  animation-direction:reverse;
+}
+.flora-ring-dot-2 {
+  width:3px;height:3px;margin-left:-1.5px;opacity:0.7;
 }
 
 
