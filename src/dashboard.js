@@ -29,10 +29,10 @@ let isPlaying = false;
 // ── State config (colors, scale, labels) ─────────────────────────────
 const FLORA_STATES = {
   idle: {
-    c1: 'rgba(16,185,129,0.35)', c2: 'rgba(20,184,166,0.35)', c3: 'rgba(74,222,128,0.35)',
-    glow: '0 0 60px rgba(16,185,129,0.2)', scale: 1, rotation: 0, petalSpread: 1,
+    c1: 'rgba(120,113,108,0.35)', c2: 'rgba(168,162,158,0.30)', c3: 'rgba(140,135,130,0.35)',
+    glow: '0 0 60px rgba(120,113,108,0.15)', scale: 1, rotation: 0, petalSpread: 1,
     ringSpeed: 12, label: 'Monitoring Systems', sub: 'All bio-metrics nominal',
-    ascii: '.:+*+:.',  stateColor: '#1a1a1a',
+    ascii: '.:+*+:.',  stateColor: '#6b7280',
   },
   listening: {
     c1: 'rgba(34,211,238,0.45)', c2: 'rgba(59,130,246,0.35)', c3: 'rgba(94,234,212,0.45)',
@@ -41,10 +41,10 @@ const FLORA_STATES = {
     ascii: '>>||||<<', stateColor: '#2563eb',
   },
   thinking: {
-    c1: 'rgba(168,85,247,0.45)', c2: 'rgba(99,102,241,0.45)', c3: 'rgba(74,222,128,0.35)',
-    glow: '0 0 60px rgba(168,85,247,0.25)', scale: 0.9, rotation: 180, petalSpread: 0.8,
+    c1: 'rgba(16,185,129,0.45)', c2: 'rgba(34,197,94,0.40)', c3: 'rgba(74,222,128,0.45)',
+    glow: '0 0 60px rgba(16,185,129,0.25)', scale: 0.9, rotation: 180, petalSpread: 0.8,
     ringSpeed: 3, label: 'Processing', sub: 'Querying knowledge base...',
-    ascii: '...oOo...', stateColor: '#6b7280',
+    ascii: '...oOo...', stateColor: '#15803d',
   },
   speaking: {
     c1: 'rgba(163,230,53,0.5)', c2: 'rgba(16,185,129,0.45)', c3: 'rgba(134,239,172,0.5)',
@@ -333,9 +333,9 @@ function renderAvatar() {
   const s = FLORA_STATES[floraState];
   // Light-theme orb colors per state
   const orbColors = {
-    idle:      ['rgba(34,197,94,0.45)','rgba(16,185,129,0.35)','rgba(74,222,128,0.50)'],
+    idle:      ['rgba(120,113,108,0.40)','rgba(168,162,158,0.30)','rgba(140,135,130,0.40)'],
     listening: ['rgba(59,130,246,0.50)','rgba(34,211,238,0.40)','rgba(96,165,250,0.55)'],
-    thinking:  ['rgba(120,113,108,0.45)','rgba(168,162,158,0.35)','rgba(87,83,78,0.50)'],
+    thinking:  ['rgba(34,197,94,0.50)','rgba(16,185,129,0.40)','rgba(74,222,128,0.50)'],
     speaking:  ['rgba(34,197,94,0.55)','rgba(22,163,74,0.45)','rgba(74,222,128,0.60)'],
     alert:     ['rgba(239,68,68,0.50)','rgba(249,115,22,0.40)','rgba(220,38,38,0.55)'],
   };
