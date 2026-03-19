@@ -1512,7 +1512,7 @@ html,body,#dashboard {
 .detail-crop-meta { font-family:var(--mono);font-size:0.55rem;color:var(--text3);margin-top:4px; }
 .detail-empty { font-family:var(--mono);font-size:0.65rem;color:var(--text3);padding:20px 0;text-align:center; }
 .detail-section-title { font-family:var(--mono);font-size:0.58rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text2);margin-bottom:8px; }
-.detail-ascii { font-family:var(--mono);font-size:0.82rem;line-height:1.35;white-space:pre;color:var(--text2);margin-bottom:10px; }
+.detail-ascii { font-family:var(--mono);font-size:1.6rem;line-height:1.3;white-space:pre;color:var(--text2);margin-bottom:10px; }
 .detail-ascii-legend { display:flex;gap:14px;font-family:var(--mono);font-size:0.58rem;color:var(--text3);margin-top:6px; }
 .detail-two-col { display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:4px; }
 .detail-env-list { display:flex;flex-direction:column; }
