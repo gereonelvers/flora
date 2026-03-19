@@ -60,10 +60,34 @@ const FLORA_STATES = {
   },
 };
 
+let floraWakeReason = ''; // why Flora woke up (set before runFloraAutonomous)
+
+function getFloraStatusText() {
+  if (floraRunning) {
+    const reason = floraWakeReason || 'routine scan';
+    return `Working · ${reason}`;
+  }
+  if (floraState === 'thinking') return 'Processing query...';
+  if (floraState === 'listening') return 'Listening...';
+  if (floraState === 'speaking') return 'Speaking...';
+  if (floraState === 'alert') return 'Anomaly detected';
+  // Sleeping — show next wake time
+  const nextCheck = state?.floraNextCheckSol || (lastAnalysisSol + 5);
+  const curSol = state?.mission?.currentSol || 1;
+  if (nextCheck > curSol) return `Sleeping · wakes Sol ${nextCheck}`;
+  return 'Idle · monitoring';
+}
+
+function updateFloraStatus() {
+  const el = document.getElementById('flora-status-text');
+  if (el) el.textContent = getFloraStatusText();
+}
+
 let stateTimeout = null;
 function setFloraState(s) {
   floraState = s;
   updateAvatar();
+  updateFloraStatus();
   clearTimeout(stateTimeout);
   if (s === 'thinking' || s === 'speaking') {
     stateTimeout = setTimeout(() => {
@@ -928,6 +952,8 @@ async function runFloraAutonomous() {
   }
 
   floraRunning = false;
+  floraWakeReason = '';
+  updateFloraStatus();
 }
 
 // Check for new floraLog entries from server (Lambda writes these directly)
@@ -1193,10 +1219,9 @@ function render() {
     <div class="flora-chat-panel ${chatOpen ? 'flora-chat-open' : ''}" id="flora-chat-panel">
       <div class="flora-chat-header">
         <span class="flora-chat-title">FLORA</span>
-        <span class="flora-chat-state">${FLORA_STATES[floraState].label}</span>
+        <span class="flora-chat-status" id="flora-status-text">${getFloraStatusText()}</span>
         <button class="flora-chat-close" id="flora-chat-close">&times;</button>
       </div>
-      ${floraRunning ? '<div class="flora-status-bar"><span class="flora-status-dot"></span> Analyzing greenhouse state via knowledge base...</div>' : ''}
       <div class="d-messages" id="d-messages">
         <div class="d-journal-section">
           <div class="d-journal-toggle" id="d-journal-toggle">
@@ -1636,7 +1661,7 @@ html,body,#dashboard {
 .flora-chat-title {
   font-family:var(--serif);font-size:1.1rem;
 }
-.flora-chat-state {
+.flora-chat-status {
   font-family:var(--mono);font-size:0.52rem;color:var(--text3);
   text-transform:uppercase;letter-spacing:0.1em;
 }
@@ -2122,6 +2147,7 @@ document.head.appendChild(style);
       (!m.onlineSol || state.mission.currentSol >= m.onlineSol) && m.crops.length === 0
     );
     if (emptyOnline && !floraRunning) {
+      floraWakeReason = 'empty modules online';
       setTimeout(() => runFloraAutonomous(), 1000);
     }
   }
@@ -2181,6 +2207,7 @@ setInterval(async () => {
   }
 
   checkFloraLog();
+  updateFloraStatus();
 
   // Check if FLORA should run after sol change
   if (state.mission.started && saved.mission.currentSol > prevSol) {
@@ -2192,6 +2219,7 @@ setInterval(async () => {
     );
     if (!floraRunning && (crewStarving || emptyOnline || scheduledWake)) {
       lastAnalysisSol = state.mission.currentSol;
+      floraWakeReason = crewStarving ? 'crew food shortage' : emptyOnline ? 'empty modules online' : 'scheduled scan';
       runFloraAutonomous();
     }
   }
