@@ -64,44 +64,22 @@ export function initUI() {
     </div>
     <div class="hud-actions">
       <button id="btn-speed-0" class="hud-btn hud-speed-btn">⏸</button>
-      <button id="btn-speed-1" class="hud-btn hud-speed-btn active">1×</button>
-      <button id="btn-speed-3" class="hud-btn hud-speed-btn">3×</button>
-      <button id="btn-speed-10" class="hud-btn hud-speed-btn">10×</button>
-      <button id="btn-advance-1" class="hud-btn">+1 Sol</button>
-      <button id="btn-advance-10" class="hud-btn">+10</button>
+      <button id="btn-speed-1" class="hud-btn hud-speed-btn">1×</button>
+      <button id="btn-speed-1500" class="hud-btn hud-speed-btn active">1.5k×</button>
+      <button id="btn-speed-5000" class="hud-btn hud-speed-btn">5k×</button>
+      <button id="btn-speed-15000" class="hud-btn hud-speed-btn">15k×</button>
     </div>
     <div class="hud-actions">
-      <button id="btn-auto-plant" class="hud-btn hud-btn-accent">Ask FLORA to Plan</button>
+      <button id="btn-advance-10" class="hud-btn">+10 Sols</button>
+      <button id="btn-advance-30" class="hud-btn">+30 Sols</button>
+    </div>
+    <div class="hud-actions" style="margin-top:4px">
+      <button id="btn-reset" class="hud-btn hud-btn-reset">Reset Simulation</button>
     </div>
   `;
   app.appendChild(hud);
 
-  // ── Chat Panel (bottom-right) ──
-  const chat = document.createElement('div');
-  chat.id = 'chat-panel';
-  chat.innerHTML = `
-    <div class="chat-header" id="chat-toggle">
-      <span class="chat-title">FLORA</span>
-      <span class="chat-subtitle">Frontier Life-support Operations &amp; Resource Agent</span>
-      <span class="chat-toggle-icon" id="chat-toggle-icon">▼</span>
-    </div>
-    <div class="chat-body" id="chat-body">
-      <div class="chat-messages" id="chat-messages">
-        <div class="chat-msg chat-msg-agent">
-          <div class="chat-msg-content">
-            Hello, I'm <strong>FLORA</strong> — your Frontier Life-support Operations &amp; Resource Agent.
-            I manage crop planning, resource optimization, and emergency response
-            for the 450-day mission. What would you like to do first?
-          </div>
-        </div>
-      </div>
-      <div class="chat-input-area">
-        <input type="text" id="chat-input" placeholder="Ask FLORA anything..." autocomplete="off" />
-        <button id="chat-send" class="chat-send-btn">▶</button>
-      </div>
-    </div>
-  `;
-  app.appendChild(chat);
+  // Chat panel removed — FLORA chat lives on the dashboard only
 
   // ── Inject styles ──
   const style = document.createElement('style');
@@ -109,46 +87,50 @@ export function initUI() {
   document.head.appendChild(style);
 
   // ── Wire events ──
-  const input = document.getElementById('chat-input');
-  const sendBtn = document.getElementById('chat-send');
-
-  const doSend = () => {
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = '';
-    handleUserMessage(text);
-  };
-
-  sendBtn.addEventListener('click', doSend);
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
-
-  document.getElementById('btn-advance-1').addEventListener('click', () => { state = advanceSol(state, 1); saveState(state); updateHUD(); });
   document.getElementById('btn-advance-10').addEventListener('click', () => { state = advanceSol(state, 10); saveState(state); updateHUD(); });
-  document.getElementById('btn-auto-plant').addEventListener('click', () => {
-    handleUserMessage('Analyze the current greenhouse state and recommend an optimal crop plan. Provide actions I can execute.');
+  document.getElementById('btn-advance-30').addEventListener('click', () => { state = advanceSol(state, 30); saveState(state); updateHUD(); });
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    if (confirm('Reset simulation to Sol 1? All crops, harvests, and progress will be lost.')) {
+      state = resetState();
+      updateHUD();
+      window.__flora3d?.resetSolFraction?.();
+    }
   });
 
-  // Speed controls
-  const speedBtns = { 0: 'btn-speed-0', 1: 'btn-speed-1', 3: 'btn-speed-3', 10: 'btn-speed-10' };
+  // Speed controls — true multipliers (1x = real time, 1 sol = 24.65h)
+  const speedBtns = { 0: 'btn-speed-0', 1: 'btn-speed-1', 1500: 'btn-speed-1500', 5000: 'btn-speed-5000', 15000: 'btn-speed-15000' };
+  const speedLabels = { 0: 'PAUSED', 1: '1× REAL', 1500: '1.5k×', 5000: '5k×', 15000: '15k×' };
   const setSpeed = (s) => {
     if (window.__flora3d) window.__flora3d.setSimSpeed(s);
-    Object.entries(speedBtns).forEach(([, id]) => document.getElementById(id)?.classList.remove('active'));
+    Object.values(speedBtns).forEach(id => document.getElementById(id)?.classList.remove('active'));
     document.getElementById(speedBtns[s])?.classList.add('active');
     const el = document.getElementById('hud-speed');
-    if (el) el.textContent = s === 0 ? 'PAUSED' : `${s}×`;
+    if (el) el.textContent = speedLabels[s] || `${s}×`;
   };
   document.getElementById('btn-speed-0').addEventListener('click', () => setSpeed(0));
   document.getElementById('btn-speed-1').addEventListener('click', () => setSpeed(1));
-  document.getElementById('btn-speed-3').addEventListener('click', () => setSpeed(3));
-  document.getElementById('btn-speed-10').addEventListener('click', () => setSpeed(10));
+  document.getElementById('btn-speed-1500').addEventListener('click', () => setSpeed(1500));
+  document.getElementById('btn-speed-5000').addEventListener('click', () => setSpeed(5000));
+  document.getElementById('btn-speed-15000').addEventListener('click', () => setSpeed(15000));
 
   // Real-time sol advance callback (called by main.js animation loop when a full sol completes)
   window.__floraUI = {
-    advanceSol: () => {
+    advanceSol: async () => {
+      // Always fetch latest state first to avoid overwriting FLORA's background changes
+      try {
+        const latest = await loadState();
+        if (latest) {
+          if (state.mission?.started && !latest.mission?.started) latest.mission.started = true;
+          state = latest;
+        }
+      } catch {}
       state = advanceSol(state, 1);
       saveState(state);
       updateHUD();
     },
+    getCurrentSol: () => state.mission.currentSol,
+    getStarted: () => state.mission?.started ?? false,
+    setStarted: (v) => { state.mission.started = v; saveState(state); },
   };
 
   // Update time-of-day clock every 200ms
@@ -161,13 +143,6 @@ export function initUI() {
   }, 200);
 
   // Chat toggle
-  document.getElementById('chat-toggle').addEventListener('click', () => {
-    const body = document.getElementById('chat-body');
-    const icon = document.getElementById('chat-toggle-icon');
-    body.classList.toggle('collapsed');
-    icon.textContent = body.classList.contains('collapsed') ? '▲' : '▼';
-  });
-
   // Load state from server
   (async () => {
     const saved = await loadState();
@@ -178,8 +153,17 @@ export function initUI() {
   setInterval(async () => {
     const saved = await loadState();
     if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
+      const prevSol = state.mission.currentSol;
+      // Preserve started flag — never regress from true to false via polling
+      if (state.mission?.started && !saved.mission?.started) {
+        saved.mission.started = true;
+      }
       state = saved;
       updateHUD();
+      // Detect reset (sol went backwards) — reset the 3D animation clock
+      if (saved.mission.currentSol < prevSol) {
+        window.__flora3d?.resetSolFraction?.();
+      }
     }
   }, 3000);
 
@@ -325,6 +309,8 @@ const UI_STYLES = `
 }
 .hud-btn:hover { background:rgba(255,255,255,0.06); }
 .hud-btn-accent { flex-basis:100%;margin-top:2px;border-color:rgba(255,255,255,0.18); }
+.hud-btn-reset { flex-basis:100%;color:rgba(248,113,113,0.8);border-color:rgba(248,113,113,0.2); }
+.hud-btn-reset:hover { border-color:rgba(248,113,113,0.5);background:rgba(248,113,113,0.08); }
 
 /* ── Chat Panel ── */
 #chat-panel {

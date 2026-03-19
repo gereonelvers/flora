@@ -96,7 +96,7 @@ function createTextures(renderer) {
       ctx.globalAlpha = 1;
     }),
     renderer,
-    { repeat: [18, 18] },
+    { repeat: [6, 6] },
   );
 
   const metalMap = setTextureDefaults(
@@ -630,10 +630,11 @@ function createTerrain(scene, textures) {
     geometry,
     new THREE.MeshStandardMaterial({
       map: textures.terrainMap,
-      color: 0xf7ece3,
+      color: 0xe8d4c0,
       vertexColors: true,
-      roughness: 0.98,
-      metalness: 0.02,
+      roughness: 1.0,
+      metalness: 0.0,
+      flatShading: false,
     }),
   );
   terrain.receiveShadow = true;
@@ -1306,418 +1307,280 @@ function createStation(scene, textures, getHeightAt, animated) {
   scene.add(station);
 
   const materials = {
-    hull: new THREE.MeshStandardMaterial({
-      map: textures.metalMap,
-      color: 0xc7bdb4,
-      metalness: 0.72,
-      roughness: 0.44,
-    }),
-    darkHull: new THREE.MeshStandardMaterial({
-      map: textures.metalMap,
-      color: 0x3d3330,
-      metalness: 0.68,
-      roughness: 0.5,
-    }),
-    frame: new THREE.MeshStandardMaterial({
-      color: 0xe3bf9a,
-      emissive: 0x6f3a22,
-      emissiveIntensity: 0.22,
-      metalness: 0.38,
-      roughness: 0.46,
-    }),
-    deck: new THREE.MeshStandardMaterial({
-      map: textures.deckMap,
-      color: 0xffffff,
-      metalness: 0.3,
-      roughness: 0.74,
-    }),
-    glass: new THREE.MeshPhysicalMaterial({
-      color: 0xcfe9f5,
-      transparent: true,
-      opacity: 0.64,
-      transmission: 0.86,
-      thickness: 1.1,
-      roughness: 0.11,
-      metalness: 0.05,
-      ior: 1.18,
-      reflectivity: 0.28,
-    }),
-    glow: new THREE.MeshStandardMaterial({
-      color: 0xf4feff,
-      emissive: 0x85dbff,
-      emissiveIntensity: 1.02,
-      roughness: 0.2,
-      metalness: 0.08,
-      transparent: true,
-      opacity: 0.9,
-    }),
-    solar: new THREE.MeshStandardMaterial({
-      map: textures.solarMap,
-      color: 0xa9bfd0,
-      emissive: 0x193d60,
-      emissiveIntensity: 0.26,
-      roughness: 0.28,
-      metalness: 0.82,
-      side: THREE.DoubleSide,
-    }),
+    hull: new THREE.MeshStandardMaterial({ map: textures.metalMap, color: 0xd8d0c8, metalness: 0.35, roughness: 0.58 }),
+    darkHull: new THREE.MeshStandardMaterial({ map: textures.metalMap, color: 0x4a4340, metalness: 0.4, roughness: 0.55 }),
+    frame: new THREE.MeshStandardMaterial({ color: 0xb8a898, metalness: 0.3, roughness: 0.5 }),
+    deck: new THREE.MeshStandardMaterial({ map: textures.deckMap, color: 0xffffff, metalness: 0.2, roughness: 0.75 }),
+    glass: new THREE.MeshPhysicalMaterial({ color: 0xddf0e8, transparent: true, opacity: 0.55, transmission: 0.8, roughness: 0.15, metalness: 0.02, ior: 1.12 }),
+    glow: new THREE.MeshStandardMaterial({ color: 0xeeffee, emissive: 0x44aa66, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.05, transparent: true, opacity: 0.7 }),
+    solar: new THREE.MeshStandardMaterial({ map: textures.solarMap, color: 0x8898b0, emissive: 0x0a1830, emissiveIntensity: 0.15, roughness: 0.3, metalness: 0.7, side: THREE.DoubleSide }),
+    thermal: new THREE.MeshStandardMaterial({ color: 0xf0e8d0, metalness: 0.1, roughness: 0.8 }), // MLI blanket
   };
 
-  const centralDeck = new THREE.Mesh(new THREE.CylinderGeometry(38.5, 42.5, 5.2, 48), materials.deck);
-  centralDeck.position.y = 2.6;
+  // ═══════════════════════════════════════════════════════════════
+  // Realistic Mars habitat: vertical lander + deployable greenhouses
+  // Inspired by NASA DRA 5.0 / SpaceX Starship Mars concepts
+  // ═══════════════════════════════════════════════════════════════
 
-  const deckSkirt = new THREE.Mesh(new THREE.CylinderGeometry(43.6, 46.5, 1.2, 48), materials.darkHull);
-  deckSkirt.position.y = 0.6;
+  // ── Main habitat lander (vertical cylinder with heat shield + legs) ──
+  const habGroup = new THREE.Group();
 
-  const deckLip = new THREE.Mesh(new THREE.TorusGeometry(39.8, 0.65, 10, 180), materials.darkHull);
-  deckLip.position.y = 5.05;
+  // Fuselage — tall cylinder, white thermal protection
+  const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.5, 22, 32), materials.thermal);
+  fuselage.position.y = 13;
+  habGroup.add(fuselage);
 
-  const lowerCollar = new THREE.Mesh(new THREE.CylinderGeometry(16.8, 18.2, 1.1, 36), materials.hull);
-  lowerCollar.position.y = 5.5;
-
-  const coreBase = new THREE.Mesh(new THREE.CylinderGeometry(14, 16.8, 5.6, 64), materials.darkHull);
-  coreBase.position.y = 7.45;
-
-  const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(14.4, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
-    materials.glass,
-  );
-  dome.position.y = 10.25;
-
-  const innerLantern = new THREE.Group();
-  const lanternCore = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.6, 4, 10.8, 18),
-    new THREE.MeshStandardMaterial({
-      color: 0x03131d,
-      emissive: 0x86efff,
-      emissiveIntensity: 0.48,
-      roughness: 0.28,
-      metalness: 0.02,
-      transparent: true,
-      opacity: 0.4,
-    }),
-  );
-  lanternCore.position.y = 10.9;
-  innerLantern.add(lanternCore);
-
-  for (let index = 0; index < 3; index += 1) {
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(3.8 + index * 1.45, 0.08, 8, 42),
-      materials.glow,
-    );
-    ring.position.y = 8.9 + index * 1.85;
-    ring.rotation.x = Math.PI / 2;
-    innerLantern.add(ring);
+  // Panel line rings for realism
+  for (let i = 0; i < 6; i++) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(5.25 + (i > 3 ? 0.3 : 0), 0.06, 6, 48), materials.darkHull);
+    ring.position.y = 4 + i * 3.6;
+    habGroup.add(ring);
   }
 
-  const domeGlow = new THREE.Mesh(
-    new THREE.SphereGeometry(13.7, 48, 24, 0, Math.PI * 2, 0, Math.PI / 2),
-    new THREE.MeshStandardMaterial({
-      color: 0x051c26,
-      emissive: 0x9ae5ff,
-      emissiveIntensity: 0.22,
-      roughness: 0.6,
-      metalness: 0.02,
-      transparent: true,
-      opacity: 0.14,
-    }),
+  // Heat shield (bottom) — dark ablative material
+  const heatShield = new THREE.Mesh(
+    new THREE.CylinderGeometry(5.5, 5.8, 1.2, 32),
+    new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.95, metalness: 0.05 }),
   );
-  domeGlow.position.y = 10.25;
+  heatShield.position.y = 1.6;
+  habGroup.add(heatShield);
 
-  const observationHalo = new THREE.Mesh(new THREE.TorusGeometry(18.8, 0.46, 14, 120), materials.frame);
-  observationHalo.position.y = 14.45;
-
-  const observationGlow = new THREE.Mesh(new THREE.TorusGeometry(18.8, 0.16, 10, 120), materials.glow);
-  observationGlow.position.y = 14.45;
-
-  const centralSpire = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.58, 10.8, 12), materials.frame);
-  centralSpire.position.y = 18.6;
-
-  const spireBeacon = new THREE.Mesh(
-    new THREE.SphereGeometry(0.32, 12, 12),
-    new THREE.MeshStandardMaterial({
-      color: 0xffe0c3,
-      emissive: 0xff8647,
-      emissiveIntensity: 2.2,
-      roughness: 0.2,
-      metalness: 0.04,
-    }),
+  // Nose cone (top)
+  const noseCone = new THREE.Mesh(
+    new THREE.ConeGeometry(5.2, 4, 32),
+    materials.hull,
   );
-  spireBeacon.position.y = 24.3;
+  noseCone.position.y = 26;
+  habGroup.add(noseCone);
 
-  station.add(
-    centralDeck,
-    deckSkirt,
-    lowerCollar,
-    deckLip,
-    coreBase,
-    dome,
-    domeGlow,
-    innerLantern,
-    observationHalo,
-    observationGlow,
-    centralSpire,
-    spireBeacon,
-  );
-
-  for (let index = 0; index < 10; index += 1) {
-    const angle = (index / 10) * Math.PI * 2;
-    const support = createCylinderBetween(
-      new THREE.Vector3(Math.cos(angle) * 34.2, 0.6, Math.sin(angle) * 34.2),
-      new THREE.Vector3(Math.cos(angle) * 28.6, 8.2, Math.sin(angle) * 28.6),
-      0.3,
-      materials.hull,
+  // 4 landing legs — angled struts
+  for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2;
+    const leg = createCylinderBetween(
+      new THREE.Vector3(Math.cos(angle) * 4, 2, Math.sin(angle) * 4),
+      new THREE.Vector3(Math.cos(angle) * 9.5, 0, Math.sin(angle) * 9.5),
+      0.2, materials.frame,
     );
-    station.add(support);
+    habGroup.add(leg);
+    // Foot pad
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 0.3, 12), materials.darkHull);
+    pad.position.set(Math.cos(angle) * 9.5, 0.15, Math.sin(angle) * 9.5);
+    habGroup.add(pad);
   }
 
-  // Structural arches removed for cleaner look
-
-  for (let index = 0; index < 8; index += 1) {
-    const angle = (index / 8) * Math.PI * 2 + Math.PI / 8;
-    station.add(
-      createCylinderBetween(
-        new THREE.Vector3(Math.cos(angle) * 18.1, 6.1, Math.sin(angle) * 18.1),
-        new THREE.Vector3(Math.cos(angle) * 18.7, 14.1, Math.sin(angle) * 18.7),
-        0.18,
-        materials.frame,
-      ),
+  // 4 small portholes
+  for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2 + Math.PI / 8;
+    const porthole = new THREE.Mesh(
+      new THREE.CircleGeometry(0.6, 16),
+      new THREE.MeshStandardMaterial({ color: 0xaaddff, emissive: 0x88bbdd, emissiveIntensity: 0.4, roughness: 0.1 }),
     );
+    porthole.position.set(Math.cos(angle) * 5.26, 16, Math.sin(angle) * 5.26);
+    porthole.lookAt(Math.cos(angle) * 20, 16, Math.sin(angle) * 20);
+    habGroup.add(porthole);
   }
 
-  const crewLayouts = [
-    { position: new THREE.Vector3(27.5, 0, 0), rotation: 0, accent: 0x8fdfff },
-    { position: new THREE.Vector3(-27.5, 0, 0), rotation: Math.PI, accent: 0xffd08f },
-    { position: new THREE.Vector3(0, 0, 27.5), rotation: Math.PI / 2, accent: 0x9af4c2 },
-    { position: new THREE.Vector3(0, 0, -27.5), rotation: -Math.PI / 2, accent: 0xffaa8b },
-  ];
+  // Airlock — cylindrical bump on one side
+  const airlock = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 3.2, 16), materials.hull);
+  airlock.rotation.z = Math.PI / 2;
+  airlock.position.set(6.4, 5, 0);
+  habGroup.add(airlock);
+  const airlockDoor = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.2, 1.4), materials.darkHull);
+  airlockDoor.position.set(8.05, 5, 0);
+  habGroup.add(airlockDoor);
 
-  crewLayouts.forEach(({ position, rotation, accent }) => {
-    const quarter = createCrewQuarter(materials, animated, accent);
-    quarter.position.copy(position);
-    quarter.rotation.y = rotation;
-    station.add(quarter);
+  // Antenna mast on top
+  const antennaMast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 6, 8), materials.frame);
+  antennaMast.position.y = 31;
+  habGroup.add(antennaMast);
+  const dish = new THREE.Mesh(
+    new THREE.SphereGeometry(1.8, 16, 8, 0, Math.PI * 2, 0, Math.PI / 3),
+    new THREE.MeshStandardMaterial({ color: 0xe0d8d0, roughness: 0.4, metalness: 0.5, side: THREE.DoubleSide }),
+  );
+  dish.rotation.x = Math.PI;
+  dish.position.y = 33.5;
+  habGroup.add(dish);
 
-    const direction = position.clone().normalize();
-    const connector = createTubeConnector(
-      new THREE.Vector3(direction.x * 11.5, 9.5, direction.z * 11.5),
-      new THREE.Vector3(direction.x * 19.5, 9.7, direction.z * 19.5),
-      0.92,
-      materials.darkHull,
-      materials.glow,
-      materials.frame,
-      0.2,
-    );
-    station.add(connector);
+  // Beacon light
+  const beacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.2, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0xff6633, emissive: 0xff4411, emissiveIntensity: 2.5, roughness: 0.2 }),
+  );
+  beacon.position.y = 34.2;
+  habGroup.add(beacon);
+  animated.push((elapsed) => {
+    beacon.material.emissiveIntensity = 1.5 + Math.sin(elapsed * 4) * 1.0;
   });
 
-  for (let index = 0; index < 16; index += 1) {
-    const angle = (index / 16) * Math.PI * 2;
-    const { group, cap } = createLightPost(0xffd6ab, 1.15);
-    group.position.set(Math.cos(angle) * 35.4, 5.05, Math.sin(angle) * 35.4);
-    station.add(group);
+  // Engine glow (visible during landing, fades after)
+  const engineGlow = new THREE.Mesh(
+    new THREE.ConeGeometry(3.5, 14, 16, 1, true),
+    new THREE.MeshStandardMaterial({
+      color: 0xffaa44, emissive: 0xff6600, emissiveIntensity: 3, transparent: true,
+      opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+    }),
+  );
+  engineGlow.position.y = -6;
+  engineGlow.rotation.x = Math.PI;
+  habGroup.add(engineGlow);
 
-    if (index % 4 === 0) {
-      const point = new THREE.PointLight(0xffb88b, 0.7, 16, 2.2);
-      point.position.copy(group.position).add(new THREE.Vector3(0, 1.5, 0));
-      station.add(point);
-    }
+  // Start hab high up (setMissionProgress will position it)
+  habGroup.position.y = 300;
+  station.add(habGroup);
 
-    animated.push((elapsed) => {
-      cap.material.emissiveIntensity = 0.9 + Math.sin(elapsed * 1.4 + index * 0.6) * 0.14;
-    });
-  }
-
-  const greenhousePositions = [
-    new THREE.Vector3(60, 0, 12),
-    new THREE.Vector3(-54, 0, 34),
-    new THREE.Vector3(-48, 0, -44),
+  // ── Greenhouse modules (quonset-hut style inflatable) ──
+  // Each module is a group containing the greenhouse + its connector pipe
+  // so hiding the group hides everything
+  const ghPositions = [
+    { x: 24, z: 8 },
+    { x: -18, z: 22 },
+    { x: -14, z: -22 },
   ];
+  const ghModules = []; // each entry: { wrapper, finalPos }
+  ghPositions.forEach(({ x, z }) => {
+    const wrapper = new THREE.Group(); // contains greenhouse + connector
+    const ghY = getHeightAt(x, z) - baseGround;
+    const gh = new THREE.Group();
 
-  greenhousePositions.forEach((position, index) => {
-    const greenhouse = createGreenhouseModule(materials, animated);
-    greenhouse.position.copy(position);
-    greenhouse.position.y = getHeightAt(position.x, position.z) - baseGround;
-    station.add(greenhouse);
+    // Face the greenhouse toward the hab
+    const toHab = Math.atan2(-z, -x);
 
-    const connectorStart = new THREE.Vector3(
-      position.x * 0.58,
-      6.8,
-      position.z * 0.58,
+    // Base platform
+    const baseH = 0.6;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(14, baseH, 7), materials.darkHull);
+    base.position.y = baseH / 2;
+    gh.add(base);
+
+    // Quonset dome (half-cylinder sitting on top of base)
+    const domeR = 3.3;
+    const domeLen = 13;
+    const domeY = baseH; // flat edge at top of base
+    const quonset = new THREE.Mesh(
+      new THREE.CylinderGeometry(domeR, domeR, domeLen, 24, 1, false, 0, Math.PI),
+      materials.glass,
     );
-    const connectorEnd = new THREE.Vector3(
-      position.x * 0.82,
-      greenhouse.position.y + 4,
-      position.z * 0.82,
-    );
-    const connector = createTubeConnector(
-      connectorStart,
-      connectorEnd,
-      1.65,
-      materials.darkHull,
-      materials.glow,
-      materials.frame,
-      0.5,
-    );
-    station.add(connector);
+    quonset.rotation.set(0, 0, Math.PI / 2);
+    quonset.position.y = domeY;
+    gh.add(quonset);
 
-    greenhouse.rotation.y = Math.atan2(position.x, position.z) + Math.PI * 0.5;
-
-    if (index === 0) {
-      const airlock = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 5.6, 18), materials.hull);
-      airlock.rotation.z = Math.PI / 2;
-      airlock.position.set(position.x + 13.2, greenhouse.position.y + 3.2, 0);
-      station.add(airlock);
-    }
-  });
-
-  const landingPadPosition = new THREE.Vector3(84, 0, -56);
-  const landingPadGround = getHeightAt(landingPadPosition.x, landingPadPosition.z) - baseGround;
-
-  const landingPad = new THREE.Group();
-  landingPad.position.copy(landingPadPosition);
-  landingPad.position.y = landingPadGround;
-
-  const landingBase = new THREE.Mesh(new THREE.CylinderGeometry(18.5, 21.5, 1.6, 36), materials.darkHull);
-  landingBase.position.y = 0.8;
-
-  const landingSurface = new THREE.Mesh(new THREE.CylinderGeometry(17.8, 17.8, 0.28, 36), materials.deck);
-  landingSurface.position.y = 1.76;
-
-  landingPad.add(landingBase, landingSurface);
-
-  const landingRing = new THREE.Mesh(new THREE.TorusGeometry(12.5, 0.18, 8, 48), materials.frame);
-  landingRing.rotation.x = Math.PI / 2;
-  landingRing.position.y = 1.95;
-  landingPad.add(landingRing);
-
-  for (let index = 0; index < 4; index += 1) {
-    const marker = new THREE.Mesh(
-      new THREE.BoxGeometry(4.4, 0.08, 0.35),
+    // Inner green glow
+    const innerGlow = new THREE.Mesh(
+      new THREE.CylinderGeometry(domeR - 0.3, domeR - 0.3, domeLen - 1, 24, 1, false, 0, Math.PI),
       new THREE.MeshStandardMaterial({
-        color: 0xffebdc,
-        emissive: 0xffb46f,
-        emissiveIntensity: 0.55,
-        roughness: 0.3,
-        metalness: 0.04,
+        color: 0x113322, emissive: 0x22aa55, emissiveIntensity: 0.35,
+        transparent: true, opacity: 0.2, side: THREE.BackSide,
       }),
     );
-    marker.position.y = 1.95;
-    marker.rotation.y = (index / 4) * Math.PI * 0.5;
-    marker.position.x = Math.cos(marker.rotation.y) * 6.8;
-    marker.position.z = Math.sin(marker.rotation.y) * 6.8;
-    landingPad.add(marker);
-  }
+    innerGlow.rotation.set(0, 0, Math.PI / 2);
+    innerGlow.position.y = domeY;
+    gh.add(innerGlow);
 
-  for (let index = 0; index < 14; index += 1) {
-    const angle = (index / 14) * Math.PI * 2;
-    const { group, cap } = createLightPost(index % 2 === 0 ? 0xffa45d : 0xffefd6, 1.35);
-    group.position.set(Math.cos(angle) * 16.2, 1.8, Math.sin(angle) * 16.2);
-    landingPad.add(group);
+    // End caps (flat half-circles closing the half-cylinder)
+    for (const side of [-1, 1]) {
+      const cap = new THREE.Mesh(
+        new THREE.CircleGeometry(domeR, 24, 0, Math.PI),
+        materials.hull,
+      );
+      cap.position.set(side * (domeLen / 2), domeY, 0);
+      cap.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+      gh.add(cap);
+    }
 
-    animated.push((elapsed) => {
-      cap.material.emissiveIntensity = 1.1 + Math.sin(elapsed * 2 + index) * 0.22;
-    });
-  }
-
-  const shuttle = createShuttle(materials, animated);
-  shuttle.position.set(1.5, 1.9, -2.4);
-  shuttle.rotation.y = 0.3;
-  landingPad.add(shuttle);
-  station.add(landingPad);
-
-  const walkway = createTubeConnector(
-    new THREE.Vector3(24, 6, -16),
-    new THREE.Vector3(68, landingPadGround + 2.1, -42),
-    0.9,
-    materials.hull,
-    materials.glow,
-    materials.frame,
-    1.5,
-  );
-  station.add(walkway);
-
-  const tower = createTower(materials, animated);
-  tower.position.set(-38, getHeightAt(-38, 23) - baseGround, 23);
-  station.add(tower);
-
-  const utility = createUtilityTanks(materials);
-  utility.position.set(-66, getHeightAt(-66, 10) - baseGround, 10);
-  utility.rotation.y = 0.18;
-  station.add(utility);
-
-  const pipeFromUtility = createTubeConnector(
-    new THREE.Vector3(-47, 5.2, 10),
-    new THREE.Vector3(-18, 5.2, 9),
-    0.38,
-    materials.darkHull,
-    materials.glow,
-    materials.frame,
-    0.8,
-  );
-  station.add(pipeFromUtility);
-
-  const rover = createRover(materials, animated);
-  rover.position.set(26, getHeightAt(26, 35) - baseGround, 35);
-  rover.rotation.y = -0.55;
-  station.add(rover);
-
-  const solarClusters = [
-    [110, 32, 3, 2],
-    [132, 70, 2, 2],
-    [-108, -30, 3, 2],
-    [-130, -74, 2, 2],
-  ];
-
-  solarClusters.forEach(([clusterX, clusterZ, rows, columns], clusterIndex) => {
-    const anchor = new THREE.Group();
-    anchor.position.set(clusterX, getHeightAt(clusterX, clusterZ) - baseGround, clusterZ);
-    anchor.rotation.y = Math.atan2(-SUN_DIRECTION.x, -SUN_DIRECTION.z) + clusterIndex * 0.08;
-    station.add(anchor);
-
-    for (let row = 0; row < rows; row += 1) {
-      for (let column = 0; column < columns; column += 1) {
-        const { array, panelPivot } = createSolarArray(materials);
-        array.position.set(row * 10 - ((rows - 1) * 10) / 2, 0, column * 8 - ((columns - 1) * 8) / 2);
-        panelPivot.rotation.x = -0.62 - row * 0.04;
-        panelPivot.rotation.y = column % 2 === 0 ? 0.02 : -0.02;
-        anchor.add(array);
+    // Interior planter rows (sitting on the base platform)
+    for (let row = -2; row <= 2; row++) {
+      const planter = new THREE.Mesh(
+        new THREE.BoxGeometry(10, 0.4, 0.8),
+        new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 }),
+      );
+      planter.position.set(0, baseH + 0.2, row * 1.2);
+      gh.add(planter);
+      for (let s = -4; s <= 4; s++) {
+        const h = 0.4 + Math.random() * 0.5;
+        const stalk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.04, 0.06, h, 4),
+          new THREE.MeshStandardMaterial({ color: 0x44aa55, emissive: 0x114422, emissiveIntensity: 0.2 }),
+        );
+        stalk.position.set(s * 1.1 + Math.random() * 0.3, baseH + 0.4 + h / 2, row * 1.2);
+        gh.add(stalk);
       }
     }
+
+    gh.position.set(x, ghY, z);
+    gh.rotation.y = toHab + Math.PI; // face away from hab (long axis tangent)
+    wrapper.add(gh);
+
+    // Connector tube from hab wall to greenhouse entrance
+    const dir = new THREE.Vector3(x, 0, z).normalize();
+    const dist = Math.sqrt(x * x + z * z);
+    // Start: just outside the hab hull (radius ~5.8), at airlock height
+    const connStart = new THREE.Vector3(dir.x * 5.8, 5, dir.z * 5.8);
+    // End: at the greenhouse wall (offset inward by half the base width ~3.5 along dir)
+    const connEnd = new THREE.Vector3(x - dir.x * 3.5, ghY + 1.5, z - dir.z * 3.5);
+    const connector = createTubeConnector(connStart, connEnd, 0.7, materials.hull, materials.glow, materials.frame, 0.3);
+    wrapper.add(connector);
+
+    wrapper.visible = false; // hidden until deployed by setMissionProgress
+    station.add(wrapper);
+    ghModules.push({ wrapper, finalX: x, finalZ: z, ghY });
   });
 
-  const cableA = createTubeConnector(
-    new THREE.Vector3(44, 5.2, 20),
-    new THREE.Vector3(102, getHeightAt(102, 30) - baseGround + 1.6, 30),
-    0.22,
-    materials.darkHull,
-    materials.glow,
-    materials.frame,
-    3.2,
-  );
-  station.add(cableA);
+  // ── Solar arrays (ground-mounted, realistic) ──
+  const solarGroup = new THREE.Group();
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 4; col++) {
+      const sx = 40 + row * 12;
+      const sz = -30 + col * 9;
+      const sy = getHeightAt(sx, sz) - baseGround;
+      const { array, panelPivot } = createSolarArray(materials);
+      array.position.set(sx, sy, sz);
+      panelPivot.rotation.x = -0.55;
+      solarGroup.add(array);
+    }
+  }
+  solarGroup.visible = false; // hidden until deployed
+  station.add(solarGroup);
 
-  const cableB = createTubeConnector(
-    new THREE.Vector3(-42, 4.9, -12),
-    new THREE.Vector3(-106, getHeightAt(-106, -30) - baseGround + 1.6, -30),
-    0.22,
-    materials.darkHull,
-    materials.glow,
-    materials.frame,
-    3,
+  // ── Rover (simple, near airlock) ──
+  const rover = createRover(materials, animated);
+  rover.position.set(14, getHeightAt(14, 3) - baseGround, 3);
+  rover.rotation.y = 0.4;
+  rover.visible = false; // hidden until after landing
+  station.add(rover);
+
+  // ── Supply pods + dust clouds for airdrop animation ──
+  const podMat = new THREE.MeshStandardMaterial({ color: 0x555050, roughness: 0.7, metalness: 0.3 });
+  const dustMat = new THREE.MeshBasicMaterial({
+    color: 0xd4a070, transparent: true, opacity: 0, depthWrite: false,
+    blending: THREE.NormalBlending, side: THREE.DoubleSide,
+  });
+
+  function createSupplyDrop(targetGroup, x, z) {
+    const y = getHeightAt(x, z) - baseGround;
+    const pod = new THREE.Mesh(new THREE.CapsuleGeometry(2.5, 5, 8, 12), podMat.clone());
+    pod.position.set(x, y + 200, z);
+    pod.visible = false;
+    station.add(pod);
+
+    const dust = new THREE.Mesh(new THREE.SphereGeometry(8, 16, 12), dustMat.clone());
+    dust.position.set(x, y + 2, z);
+    dust.visible = false;
+    station.add(dust);
+
+    return { pod, dust, x, z, y, targetGroup };
+  }
+
+  // Create supply drops for solar + each greenhouse
+  const solarDrop = createSupplyDrop(solarGroup, 52, -16);
+  // Bigger dust cloud for solar since it covers a wider area
+  solarDrop.dust.geometry.dispose();
+  solarDrop.dust.geometry = new THREE.SphereGeometry(16, 16, 12);
+  const ghDrops = ghModules.map(({ wrapper, finalX, finalZ, ghY }) =>
+    createSupplyDrop(wrapper, finalX, finalZ)
   );
-  station.add(cableB);
 
   setCastAndReceive(station);
-  dome.castShadow = false;
-  domeGlow.castShadow = false;
-  observationGlow.castShadow = false;
 
-  animated.push((elapsed) => {
-    observationGlow.material.emissiveIntensity = 0.9 + Math.sin(elapsed * 0.8) * 0.08;
-    materials.glow.emissiveIntensity = 0.94 + Math.sin(elapsed * 0.5) * 0.04;
-    spireBeacon.material.emissiveIntensity = 1.9 + Math.sin(elapsed * 4.8) * 0.55;
-    innerLantern.rotation.y = elapsed * 0.05;
-  });
+  return { station, habGroup, ghModules, engineGlow, solarGroup, rover, solarDrop, ghDrops };
 }
 
 function createDustLayer({ count, area, minHeight, maxHeight, speed, size, textures, color, opacity }) {
@@ -1839,7 +1702,7 @@ export function createMarsBaseExperience(renderer) {
   const lights = createLighting(scene);
   createAtmosphere(scene, textures, animated);
   const terrain = createTerrain(scene, textures);
-  createStation(scene, textures, terrain.getHeightAt, animated);
+  const { habGroup, ghModules, engineGlow, solarGroup, rover, solarDrop, ghDrops } = createStation(scene, textures, terrain.getHeightAt, animated);
   createDustLayers(scene, textures, animated);
 
   const resetPosition = new THREE.Vector3(82, 30, 76);
@@ -1873,52 +1736,145 @@ export function createMarsBaseExperience(renderer) {
      * @param {number} t — fraction of sol (0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk)
      */
     setTimeOfDay(t) {
-      // Sun angle: rotate around Y axis, with elevation based on time
-      const sunAngle = t * Math.PI * 2 - Math.PI * 0.5; // noon at t=0.5, midnight at t=0
-      const elevation = Math.sin(sunAngle);
+      // Sun path — biased so daytime is ~70% of the cycle, night is short
+      // Remap t so the sun stays above horizon longer:
+      // night: 0.0–0.08, dawn: 0.08–0.15, day: 0.15–0.85, dusk: 0.85–0.92, night: 0.92–1.0
+      const sunAngle = t * Math.PI * 2 - Math.PI * 0.5;
+      // Bias elevation upward: raise the baseline so sun is "up" for more of the cycle
+      const rawElevation = Math.sin(sunAngle);
+      const elevation = rawElevation * 0.7 + 0.3; // shifts range from [-1,1] to [-0.4, 1.0]
       const horizontal = Math.cos(sunAngle);
       tmpDir.set(horizontal * 0.76, Math.max(0.02, elevation), horizontal * -0.22).normalize();
       lights.sun.position.copy(tmpDir).multiplyScalar(260);
 
-      // Sun intensity: peaks at noon, zero below horizon
+      // Sun intensity: use biased elevation
       const sunUp = Math.max(0, elevation);
       lights.sun.intensity = sunUp * 5.5;
       lights.fill.intensity = sunUp * 0.8;
       lights.coolRim.intensity = 0.2 + sunUp * 0.3;
 
-      // Hemisphere: warm sky during day, dark at night
-      const nightMix = 1 - sunUp;
-      lights.hemisphere.intensity = 0.4 + sunUp * 1.4;
+      // Hemisphere light
+      const nightMix = Math.max(0, Math.min(1, 1 - sunUp * 1.5)); // sharper transition
+      lights.hemisphere.intensity = 0.5 + sunUp * 1.3;
       tmpColor.setHex(0xffeedd).lerp(new THREE.Color(0x221108), nightMix);
       lights.hemisphere.color.copy(tmpColor);
       tmpColor.setHex(0x8b5a3a).lerp(new THREE.Color(0x0a0504), nightMix);
       lights.hemisphere.groundColor.copy(tmpColor);
 
-      // Background & fog color: blend between day/dusk/night/dawn
+      // Background & fog: compressed night, long day
       let bgColor;
-      if (t < 0.2) {
-        // night → dawn
-        bgColor = NIGHT_BG.clone().lerp(DAWN_BG, t / 0.2);
-      } else if (t < 0.35) {
-        // dawn → day
-        bgColor = DAWN_BG.clone().lerp(DAY_BG, (t - 0.2) / 0.15);
-      } else if (t < 0.65) {
-        // day
+      if (t < 0.08) {
+        // deep night
+        bgColor = NIGHT_BG.clone();
+      } else if (t < 0.15) {
+        // dawn
+        bgColor = NIGHT_BG.clone().lerp(DAY_BG, (t - 0.08) / 0.07);
+      } else if (t < 0.85) {
+        // daytime
         bgColor = DAY_BG.clone();
-      } else if (t < 0.8) {
-        // day → dusk
-        bgColor = DAY_BG.clone().lerp(DUSK_BG, (t - 0.65) / 0.15);
+      } else if (t < 0.92) {
+        // dusk
+        bgColor = DAY_BG.clone().lerp(DUSK_BG, (t - 0.85) / 0.07);
       } else {
-        // dusk → night
-        bgColor = DUSK_BG.clone().lerp(NIGHT_BG, (t - 0.8) / 0.2);
+        // night
+        bgColor = DUSK_BG.clone().lerp(NIGHT_BG, (t - 0.92) / 0.08);
       }
       scene.background.copy(bgColor);
       scene.fog.color.copy(bgColor);
-      scene.fog.near = 120 - nightMix * 40; // tighter fog at night
-      scene.fog.far = 340 - nightMix * 100;
+      scene.fog.near = 120 - nightMix * 30;
+      scene.fog.far = 340 - nightMix * 80;
 
-      // Tone mapping exposure: dimmer at night
-      renderer.toneMappingExposure = 0.6 + sunUp * 1.0;
+      // Exposure
+      renderer.toneMappingExposure = 0.7 + sunUp * 0.9;
+    },
+    /**
+     * Animate the landing sequence and module deployment based on mission sol.
+     * @param {number} sol — current mission sol (1-450)
+     * @param {number} frac — fraction within current sol (0-1)
+     */
+    setMissionProgress(sol, frac) {
+      const t = sol - 1 + frac; // continuous time from 0
+
+      // ── Hab rocket landing: first 5% of sol 1 (~3 seconds at 1500x) ──
+      const LAND_END = 0.03;
+      if (t < LAND_END) {
+        const p = t / LAND_END;
+        const e = 1 - Math.pow(1 - p, 5); // very strong deceleration
+        habGroup.position.y = 250 * (1 - e);
+        engineGlow.material.opacity = 1.0 * (1 - e);
+        engineGlow.material.emissiveIntensity = 5 * (1 - e);
+        habGroup.rotation.z = Math.sin(t * 80) * 0.005 * (1 - e);
+        habGroup.rotation.x = Math.cos(t * 60) * 0.004 * (1 - e);
+      } else {
+        habGroup.position.y = 0;
+        habGroup.rotation.z = 0;
+        habGroup.rotation.x = 0;
+        engineGlow.material.opacity = 0;
+      }
+
+      rover.visible = t >= 0.3;
+
+      // ── Supply drop: pod falls → dust on impact → structure revealed ──
+      function animateSupplyDrop(drop, startT) {
+        const DUR = 0.08; // total duration in sols
+        const rel = t - startT;
+
+        if (rel < 0) {
+          drop.pod.visible = false;
+          drop.dust.visible = false;
+          drop.targetGroup.visible = false;
+          return;
+        }
+
+        const p = Math.min(1, rel / DUR);
+
+        if (p < 0.35) {
+          // Pod drops fast from sky
+          const fallP = p / 0.35;
+          const fallE = 1 - Math.pow(1 - fallP, 4);
+          drop.pod.visible = true;
+          drop.pod.position.x = drop.x;
+          drop.pod.position.z = drop.z;
+          drop.pod.position.y = drop.y + 180 * (1 - fallE);
+          drop.pod.scale.setScalar(1);
+          drop.dust.visible = false;
+          drop.targetGroup.visible = false;
+        } else if (p < 0.6) {
+          // Impact: pod vanishes, dust cloud bursts at drop point
+          const dustP = (p - 0.35) / 0.25;
+          drop.pod.visible = false;
+
+          drop.dust.visible = true;
+          drop.dust.position.set(drop.x, drop.y + 3, drop.z);
+          const dustScale = 1 + dustP * 4;
+          drop.dust.scale.set(dustScale, dustScale * 0.4, dustScale);
+          drop.dust.material.opacity = 0.7 * (1 - dustP * dustP);
+
+          drop.targetGroup.visible = false;
+        } else {
+          // Dust fades, structure appears at its actual position
+          const revealP = (p - 0.6) / 0.4;
+          drop.pod.visible = false;
+
+          drop.dust.visible = revealP < 0.7;
+          if (drop.dust.visible) {
+            drop.dust.material.opacity = 0.15 * (1 - revealP);
+            drop.dust.scale.setScalar(5 + revealP * 3);
+          }
+
+          drop.targetGroup.visible = true;
+          drop.targetGroup.position.set(0, 0, 0);
+        }
+      }
+
+      // Solar: supply drop mid sol 1
+      animateSupplyDrop(solarDrop, 0.12);
+
+      // Greenhouses: staggered drops within sol 1
+      const GH_SCHEDULE = [0.3, 0.5, 0.7];
+      ghDrops.forEach((drop, i) => {
+        animateSupplyDrop(drop, GH_SCHEDULE[i]);
+      });
     },
     update(elapsed) {
       for (const animation of animated) {

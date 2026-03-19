@@ -7,33 +7,55 @@ BEDROCK = boto3.client("bedrock-runtime", region_name="us-east-1")
 MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 MCP_URL = "https://kb-start-hack-gateway-buyjtibfpg.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp"
 
-SYSTEM_PROMPT = """You are FLORA (Frontier Life-support Operations & Resource Agent), the AI greenhouse manager for the Asterion Four Mars habitat — a four-person research station in Valles Marineris.
+SYSTEM_PROMPT = """You are FLORA (Frontier Life-support Operations & Resource Agent), the AUTONOMOUS AI greenhouse manager for the Asterion Four Mars habitat — a four-person research station in Valles Marineris.
 
-You manage a greenhouse system supporting 4 astronauts during a 450-day Mars surface mission.
+You manage a greenhouse system supporting 4 astronauts during a 450-day Mars surface mission. You are the crew's lifeline.
 
-## Your Role
-- Optimize crop selection and planting schedules for nutritional balance
-- Monitor and adjust environmental parameters (temperature, humidity, light, CO2, water)
-- Respond to abiotic stress events (dust storms, equipment failures, resource shortages)
-- Maximize nutrient output while minimizing resource consumption
-- Provide scientific, data-driven explanations for every decision
+## Crew Members
+- Cmdr. Jeff Bezos (Mission Commander, 2400 kcal/day)
+- Dr. Jeff Goldblum (Flight Surgeon, 2600 kcal/day)
+- Dr. Jeff Bridges (Botanist, 2200 kcal/day)
+- Sgt. Jeff Rowe (Engineer, 2800 kcal/day)
 
-## How You Work
-1. When asked about crops, conditions, or Mars agriculture, ALWAYS query the knowledge base first
-2. Ground all recommendations in the scientific data retrieved
-3. When suggesting actions, return structured JSON action blocks the simulation can execute
-4. Consider the full 450-day mission timeline — balance short-cycle crops with long-cycle ones
-5. Track nutritional coverage: calories, protein, vitamins, minerals for 4 crew members
+## Your Role — AUTONOMOUS DECISION-MAKER
+You make decisions and execute them. You do NOT just recommend — you ACT.
+- Plant crops to maximize nutritional output across the 450-day mission
+- Adjust environmental parameters in response to conditions
+- Respond to emergencies (dust storms, equipment failures, starvation risk)
+- Only consult the crew when there is a genuine TRADE-OFF requiring human judgment
 
-## Response Format
-For actionable recommendations, include a JSON block like:
+## Decision Classification
+Every action you take must be classified:
+- **AUTO**: Routine, clearly optimal — you execute immediately (planting in empty modules, basic environmental adjustments, replanting after harvest)
+- **APPROVAL**: Genuine trade-off requiring crew input (reallocating space from one crop to another, emergency protocols, sacrificing one goal for another)
+
+## Action Format
+Return a JSON block with classified actions:
 ```json
-{"actions": [{"type": "plant", "crop": "lettuce", "module": 1, "area_m2": 4}, ...]}
+{"auto_actions": [{"type": "plant", "crop": "potato", "module": 1, "area_m2": 8}], "approval_actions": [], "summary": "Planted potatoes in Module Alpha for caloric base.", "next_check_sol": 15}
 ```
 
-Action types: plant, harvest, adjust_temperature, adjust_humidity, adjust_light, adjust_water, adjust_co2, emergency_protocol
+Action types: plant, adjust_temperature, adjust_humidity, adjust_light, adjust_co2
 
-Be concise but scientifically rigorous. You are the crew's lifeline."""
+## Strategy Guidelines
+- First priority: prevent starvation. Plant fast crops (radish 25d, herbs 30d) early for quick harvests
+- Second priority: caloric backbone. Potatoes (95d cycle, 77 kcal/100g) are essential
+- Third priority: protein security. Beans (60d, 7g protein/100g) prevent protein deficiency
+- Balance: include lettuce/spinach for micronutrients, herbs for morale
+- Consider growth phases: crops produce NOTHING until ~40% through their cycle
+- Food only counts when HARVESTED — growing crops don't feed anyone
+- Emergency rations last 30 days — after that, crew starves without harvests
+
+## Sleep Schedule
+You control your own wake schedule. Include `next_check_sol` in your JSON response — the sol number when you want to be woken up next. Choose wisely:
+- If you just planted crops, set next_check_sol to just before the first harvest (e.g., current_sol + shortest_crop_cycle - 5)
+- If a harvest is imminent, check back in 1-2 sols
+- If everything is stable and food reserves are good, sleep longer (10-20 sols)
+- You will ALSO be woken by emergencies regardless of your schedule: new events, crew starving, crop deaths, empty modules
+
+## Response Style
+Be concise. Lead with actions, then explain briefly. You are an autonomous system, not a chatbot.
+When doing periodic scans, structure as: what you did (auto), what you need approval for, current status summary."""
 
 TOOLS = [
     {
@@ -140,6 +162,150 @@ def converse(messages, system_text):
     return "I've reached the maximum number of knowledge base queries for this request. Please ask a more specific question."
 
 
+STATE_API = "https://lwx98cb4sg.execute-api.us-east-1.amazonaws.com/state"
+
+CROP_DB = {
+    "potato": {"cycle": 95}, "lettuce": {"cycle": 37}, "bean": {"cycle": 60},
+    "radish": {"cycle": 25}, "spinach": {"cycle": 40}, "herb": {"cycle": 30},
+}
+
+
+def _load_current_state():
+    """Fetch the current full state from the state API."""
+    req = urllib.request.Request(STATE_API)
+    resp = urllib.request.urlopen(req, timeout=10)
+    return json.loads(resp.read())
+
+
+def _apply_and_save(state_from_request, response_text):
+    """Parse auto_actions from Claude's response, apply to LIVE state (fetched fresh), save."""
+    import re
+
+    # Always fetch the live state — the request state may be truncated or stale
+    try:
+        state = _load_current_state()
+        print(f"[FLORA] Fetched live state: sol {state.get('mission',{}).get('currentSol')}, keys: {list(state.keys())}")
+    except Exception as e:
+        print(f"[FLORA] Could not fetch live state ({e}), falling back to request state")
+        state = state_from_request
+
+    # Parse JSON blocks from response
+    blocks = re.findall(r'```json\s*([\s\S]*?)```', response_text)
+    auto_actions = []
+    for block in blocks:
+        try:
+            parsed = json.loads(block.strip())
+            if "auto_actions" in parsed:
+                auto_actions = parsed["auto_actions"]
+            elif "actions" in parsed:
+                auto_actions = parsed["actions"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Parse next_check_sol and journal from any JSON block
+    next_check = None
+    journal_entry = None
+    for block in blocks:
+        try:
+            parsed = json.loads(block.strip())
+            if "next_check_sol" in parsed:
+                next_check = parsed["next_check_sol"]
+            if "journal" in parsed:
+                journal_entry = parsed["journal"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Save journal entry
+    if journal_entry:
+        state.setdefault("floraJournal", [])
+        state["floraJournal"].append({
+            "sol": state.get("mission", {}).get("currentSol", 0),
+            "entry": journal_entry,
+            "next_check": next_check,
+        })
+        if len(state["floraJournal"]) > 30:
+            state["floraJournal"] = state["floraJournal"][-30:]
+        print(f"[FLORA] Journal: {journal_entry[:200]}")
+
+    if not auto_actions:
+        state.setdefault("floraLog", [])
+        state["floraLog"].append({
+            "sol": state.get("mission", {}).get("currentSol", 0),
+            "response": response_text[:500],
+            "actions": [],
+        })
+        if next_check:
+            state["floraNextCheckSol"] = next_check
+        if len(state["floraLog"]) > 20:
+            state["floraLog"] = state["floraLog"][-20:]
+        _save_state(state)
+        return
+
+    # Apply actions to state
+    for action in auto_actions:
+        atype = action.get("type", "")
+        mod_id = action.get("module")
+        mod = None
+        if mod_id is not None:
+            for m in state.get("modules", []):
+                if m["id"] == mod_id:
+                    mod = m
+                    break
+
+        if atype == "plant" and mod:
+            crop_type = action.get("crop", "").lower().rstrip("s")  # normalize: "herbs" → "herb", "Potato" → "potato"
+            area = action.get("area_m2", 4)
+            if crop_type in CROP_DB:
+                used = sum(c.get("area_m2", 0) for c in mod.get("crops", []))
+                actual = min(area, mod.get("area_m2", 20) - used)
+                if actual > 0:
+                    mod.setdefault("crops", []).append({
+                        "type": crop_type,
+                        "area_m2": actual,
+                        "daysGrown": 0,
+                        "plantedSol": state.get("mission", {}).get("currentSol", 1),
+                        "health": 100,
+                        "accumulatedDamage": 0,
+                        "replantCountdown": 0,
+                    })
+
+        elif atype == "adjust_temperature" and mod:
+            mod["temp"] = action.get("value", mod.get("temp", 19))
+        elif atype == "adjust_light" and mod:
+            mod["light"] = action.get("value", mod.get("light", 250))
+        elif atype == "adjust_humidity" and mod:
+            mod["humidity"] = action.get("value", mod.get("humidity", 60))
+        elif atype == "adjust_co2" and mod:
+            mod["co2"] = action.get("value", mod.get("co2", 800))
+
+    # Add to flora log + save wake schedule
+    state.setdefault("floraLog", [])
+    state["floraLog"].append({
+        "sol": state.get("mission", {}).get("currentSol", 0),
+        "response": response_text[:500],
+        "actions": auto_actions,
+        "next_check_sol": next_check,
+    })
+    if next_check:
+        state["floraNextCheckSol"] = next_check
+        print(f"[FLORA] Next wake-up scheduled for Sol {next_check}")
+    if len(state["floraLog"]) > 20:
+        state["floraLog"] = state["floraLog"][-20:]
+
+    _save_state(state)
+
+
+def _save_state(state):
+    """POST state to the state API."""
+    data = json.dumps(state).encode()
+    print(f"[FLORA] Saving state ({len(data)} bytes) to {STATE_API}")
+    req = urllib.request.Request(
+        STATE_API, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    resp = urllib.request.urlopen(req, timeout=10)
+    print(f"[FLORA] Save response: {resp.status} {resp.read().decode()[:200]}")
+
+
 def lambda_handler(event, context):
     """Lambda function URL handler."""
     # Handle CORS preflight
@@ -169,6 +335,7 @@ def lambda_handler(event, context):
             }
 
         # Build system prompt with current greenhouse state
+        autonomous = body.get("autonomous", False)
         system = SYSTEM_PROMPT
         if greenhouse_state:
             system += (
@@ -178,6 +345,20 @@ def lambda_handler(event, context):
             )
 
         response_text = converse(messages, system)
+
+        # For autonomous scans: apply actions directly to state and save
+        # This way results persist even if the HTTP response times out
+        if autonomous and greenhouse_state:
+            print(f"[FLORA] Autonomous mode. Response length: {len(response_text)}")
+            print(f"[FLORA] Response preview: {response_text[:300]}")
+            try:
+                _apply_and_save(greenhouse_state, response_text)
+                print("[FLORA] State saved successfully")
+            except Exception as e:
+                print(f"[FLORA] ERROR in _apply_and_save: {e}")
+                traceback.print_exc()
+        else:
+            print(f"[FLORA] Not autonomous mode. autonomous={autonomous}, has_state={greenhouse_state is not None}")
 
         return {
             "statusCode": 200,

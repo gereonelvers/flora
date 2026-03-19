@@ -1,14 +1,18 @@
-import { sendToAgent, parseActions, runProactiveAnalysis } from './agent-client.js';
+import { sendToAgent, parseActions, runAutonomousScan } from './agent-client.js';
 import { createInitialState, advanceSol, applyActions, plantCrop, saveState, loadState, resetState, CROP_DB } from './greenhouse.js';
 import { scorePendingMutations, getSequenceWindow, getRefBase } from './dna.js';
+import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend } from 'chart.js';
+Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend);
 
 let state = createInitialState(); // overwritten by async init below
 let chatHistory = [];
 let isListening = false;
 let floraState = 'idle'; // idle | listening | thinking | speaking | alert
-let activeTab = null; // null = orb view, 'metrics' | 'module-0' | 'module-1' | 'module-2' | 'harvests' | 'dna'
+let activeTab = 'metrics'; // default to mission overview
 let suppressPoll = false; // suppress cross-device polling briefly after reset
+// simStarted derived from state.mission.started (synced via server)
 let chatOpen = false;
+let chatMessages = []; // persist chat messages across renders: [{text, role}]
 
 // ── Voice Server Connection ──────────────────────────────────────────
 const VOICE_WS_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
@@ -169,11 +173,21 @@ function appendSystemMsg(text) {
 }
 
 function appendChatMsg(text, role) {
+  chatMessages.push({ text, role });
+  if (chatMessages.length > 50) chatMessages = chatMessages.slice(-50);
+  // Update DOM if it exists
   const msgs = document.getElementById('d-messages');
   if (!msgs) return;
-  const cls = role === 'user' ? 'd-msg-user' : 'd-msg-agent';
+  const cls = role === 'user' ? 'd-msg-user' : role === 'system' ? 'd-msg-system' : 'd-msg-agent';
   msgs.innerHTML += `<div class="d-msg ${cls}"><div class="d-msg-text">${md(text)}</div></div>`;
   msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderChatMessages() {
+  return chatMessages.map(m => {
+    const cls = m.role === 'user' ? 'd-msg-user' : m.role === 'system' ? 'd-msg-system' : 'd-msg-agent';
+    return `<div class="d-msg ${cls}"><div class="d-msg-text">${md(m.text)}</div></div>`;
+  }).join('');
 }
 
 // ── Mic Audio Capture (PCM 16kHz → base64 → WebSocket) ──────────────
@@ -359,19 +373,12 @@ function renderDetailPanel() {
   if (activeTab === 'metrics') {
     const missionPct = Math.round((state.mission.currentSol / state.mission.totalSols) * 100);
     const waterPct = Math.round((state.resources.water_liters / 5000) * 100);
-    // ASCII timeline
-    const tLen = 40;
-    const tFill = Math.round((state.mission.currentSol / state.mission.totalSols) * tLen);
-    const timeline = '[' + '='.repeat(tFill) + '>'.repeat(tFill < tLen ? 1 : 0) + '.'.repeat(Math.max(0, tLen - tFill - 1)) + ']';
-    // All modules summary
     const allCrops = state.modules.flatMap(mod => mod.crops.map(c => ({ ...c, module: mod.name })));
     return `
       <div class="detail-panel">
         <div class="detail-header">
           <span class="detail-title">Mission Overview</span>
-          <button class="detail-close" id="detail-close">&times;</button>
         </div>
-        <pre class="detail-ascii">${'SOL ' + state.mission.currentSol + ' / ' + state.mission.totalSols + '  ' + state.mission.phase}\n${timeline}\n${'Day 1' + ' '.repeat(tLen - 6) + 'Day 450'}</pre>
         <div class="detail-grid">
           <div class="detail-item">
             <div class="detail-label">Nutrition</div>
@@ -419,12 +426,47 @@ function renderDetailPanel() {
             const info = CROP_DB[c.type];
             const pct = Math.round((c.daysGrown / info.cycle) * 100);
             return `<div class="detail-crop-card">
-              <pre class="detail-crop-ascii">${cropAscii(pct)}</pre>
+              <img class="detail-crop-icon" src="/icons/${c.type}.png" alt="${info.name}" />
               <div class="detail-crop-card-name">${info.name}</div>
               <div class="detail-crop-card-meta">${pct}% &middot; ${c.module}</div>
             </div>`;
           }).join('')}
-        </div>` : '<div class="detail-empty">No crops planted across any module</div>'}
+        </div>
+        <div class="detail-section-title" style="margin-top:16px">Daily Calorie Budget</div>
+        <div class="detail-grid" style="grid-template-columns:1fr 1fr 1fr">
+          <div class="detail-item">
+            <div class="detail-label">Crew Need</div>
+            <div class="detail-value">${(state.nutrition.daily_target_kcal || 10000).toLocaleString()}</div>
+            <div class="detail-sub">kcal/sol (${(state.crew?.members || []).filter(m => m.alive).length} crew)</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Consumed Today</div>
+            <div class="detail-value ${(state.nutrition.current_daily_kcal || 0) >= (state.nutrition.daily_target_kcal || 10000) * 0.8 ? '' : (state.nutrition.current_daily_kcal || 0) > 0 ? 'warn' : 'crit'}">${(state.nutrition.current_daily_kcal || 0).toLocaleString()}</div>
+            <div class="detail-sub">kcal (${state.nutrition.coverage_percent || 0}% coverage)</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Food in Storage</div>
+            <div class="detail-value ${(state.nutrition.food_stored_kcal || 0) > (state.nutrition.daily_target_kcal || 10000) * 7 ? '' : (state.nutrition.food_stored_kcal || 0) > 0 ? 'warn' : 'crit'}">${Math.round(state.nutrition.food_stored_kcal || 0).toLocaleString()}</div>
+            <div class="detail-sub">kcal (~${Math.round((state.nutrition.food_stored_kcal || 0) / (state.nutrition.daily_target_kcal || 10000))}d supply)</div>
+          </div>
+        </div>
+        <div class="detail-grid" style="grid-template-columns:1fr 1fr;margin-top:1px">
+          <div class="detail-item">
+            <div class="detail-label">Protein Today</div>
+            <div class="detail-value">${state.nutrition.current_daily_protein_g || 0}g</div>
+            <div class="detail-sub">of ${state.nutrition.daily_target_protein_g || 220}g target</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Emergency Rations</div>
+            <div class="detail-value ${(state.nutrition.food_reserves_days || 0) > 10 ? '' : 'crit'}">${Math.round(state.nutrition.food_reserves_days || 0)}d</div>
+            <div class="detail-sub">remaining</div>
+          </div>
+        </div>
+        ${(state.nutrition.history || []).length >= 2 ? `
+        <div class="detail-section-title" style="margin-top:16px">Calorie History</div>
+        <div style="position:relative;height:180px;border:1px solid var(--border);background:#fff;padding:8px">
+          <canvas id="cal-canvas"></canvas>
+        </div>` : ''}` : '<div class="detail-empty">No crops planted across any module</div>'}
       </div>`;
   }
 
@@ -483,6 +525,68 @@ function renderDetailPanel() {
               </div>
               <div style="padding:0 0 6px;font-size:0.58rem;color:var(--text3);font-family:var(--mono)">${a.reason}</div>
             `).join('')}
+        </div>
+      </div>`;
+  }
+
+  if (activeTab === 'crew') {
+    const members = state.crew?.members || [];
+    const alive = members.filter(m => m.alive);
+    const daysOfFood = (state.nutrition.food_stored_kcal || 0) > 0
+      ? Math.round((state.nutrition.food_stored_kcal || 0) / (state.nutrition.daily_target_kcal || 10000))
+      : 0;
+    return `
+      <div class="detail-panel">
+        <div class="detail-header">
+          <span class="detail-title">Crew Status</span>
+          <button class="detail-close" id="detail-close">&times;</button>
+        </div>
+        <div class="detail-grid" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:16px">
+          <div class="detail-item">
+            <div class="detail-label">Alive</div>
+            <div class="detail-value ${alive.length < 4 ? 'crit' : ''}">${alive.length} / ${members.length}</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Food Storage</div>
+            <div class="detail-value ${daysOfFood < 3 ? 'crit' : daysOfFood < 7 ? 'warn' : ''}">${daysOfFood}d</div>
+            <div class="detail-sub">${Math.round(state.nutrition.food_stored_kcal || 0)} kcal</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Emergency Rations</div>
+            <div class="detail-value ${(state.nutrition.food_reserves_days || 0) < 5 ? 'crit' : ''}">${Math.round(state.nutrition.food_reserves_days || 0)}d</div>
+          </div>
+        </div>
+        <div class="detail-section-title">Crew Members</div>
+        <div class="crew-list">
+          ${members.map(m => {
+            const healthColor = !m.alive ? 'var(--crit)' : m.health >= 80 ? '#15803d' : m.health >= 50 ? 'var(--warn)' : 'var(--crit)';
+            const statusLabel = !m.alive ? 'DECEASED' : m.daysWithoutFood > 0 ? `STARVING (${m.daysWithoutFood}d)` : m.health >= 80 ? 'HEALTHY' : m.health >= 50 ? 'WEAKENED' : 'CRITICAL';
+            return `
+            <div class="crew-card ${!m.alive ? 'crew-dead' : ''}">
+              <div class="crew-card-top">
+                ${m.photo ? `<img class="crew-card-photo" src="${m.photo}" alt="${m.name}" />` : ''}
+                <div class="crew-card-info">
+                  <div class="crew-card-header">
+                    <span class="crew-card-name">${m.name}</span>
+                    <span class="crew-card-status" style="color:${healthColor}">${statusLabel}</span>
+                  </div>
+                  <div class="crew-card-role">${m.role}${m.activity ? ` · ${m.activity}` : ''}</div>
+                </div>
+              </div>
+              <div class="crew-card-stats">
+                <div class="crew-stat">
+                  <span class="crew-stat-label">Health</span>
+                  ${bar(m.alive ? m.health : 0, 100, healthColor)}
+                  <span class="crew-stat-val">${m.alive ? m.health : 0}%</span>
+                </div>
+                <div class="crew-stat">
+                  <span class="crew-stat-label">Daily need</span>
+                  <span class="crew-stat-val">${m.kcal_need} kcal</span>
+                </div>
+                ${m.daysWithoutFood > 0 && m.alive ? `<div class="crew-stat"><span class="crew-stat-label" style="color:var(--crit)">Days without food</span><span class="crew-stat-val" style="color:var(--crit)">${m.daysWithoutFood}</span></div>` : ''}
+              </div>
+            </div>`;
+          }).join('')}
         </div>
       </div>`;
   }
@@ -724,6 +828,9 @@ function renderDetailPanel() {
 
 // ── Sol Advance + Proactive AI ───────────────────────────────────────
 let lastAnalysisSol = 0;
+let prevHarvestCount = 0;
+
+let floraRunning = false; // prevent concurrent agent calls
 
 function advanceAndAnalyze(days) {
   const prevEvents = (state.events || []).length;
@@ -731,19 +838,27 @@ function advanceAndAnalyze(days) {
   saveState(state);
   render();
 
-  // Trigger proactive AI analysis if:
-  // - new events appeared
-  // - nutrition dropped below threshold
-  // - enough sols passed since last analysis (every 10 sols)
-  // - energy crisis
+  // Trigger autonomous FLORA scan based on:
+  // 1. FLORA's own wake schedule (next_check_sol)
+  // 2. Emergency triggers (regardless of schedule)
   const hasNewEvents = (state.events || []).length > prevEvents;
-  const nutritionCritical = state.nutrition.coverage_percent < 60;
-  const energyCrisis = (state.energy?.balance || 0) < -20;
-  const solsSinceAnalysis = state.mission.currentSol - lastAnalysisSol;
+  const crewStarving = (state.crew?.members || []).some(m => m.alive && m.daysWithoutFood > 0);
+  const emptyOnlineModules = state.modules.some(m =>
+    (!m.onlineSol || state.mission.currentSol >= m.onlineSol) && m.crops.length === 0
+  );
+  const newHarvests = state.harvests.length > (prevHarvestCount || 0);
+  prevHarvestCount = state.harvests.length;
 
-  if (hasNewEvents || nutritionCritical || energyCrisis || solsSinceAnalysis >= 10) {
+  // FLORA's self-scheduled wake-up
+  const nextCheck = state.floraNextCheckSol || (lastAnalysisSol + 5);
+  const scheduledWake = state.mission.currentSol >= nextCheck;
+
+  // Emergency triggers always wake FLORA
+  const emergency = hasNewEvents || crewStarving || emptyOnlineModules;
+
+  if (!floraRunning && (emergency || scheduledWake || newHarvests)) {
     lastAnalysisSol = state.mission.currentSol;
-    triggerProactiveAgent();
+    runFloraAutonomous();
   }
 
   // Auto-score new DNA mutations in background
@@ -759,42 +874,205 @@ function advanceAndAnalyze(days) {
   }
 }
 
-async function triggerProactiveAgent() {
-  setFloraState('thinking');
-  appendChatMsg(`[Proactive scan — Sol ${state.mission.currentSol}]`, 'system');
+let lastFloraLogLen = 0; // track flora log length to detect new entries
 
-  const response = await runProactiveAnalysis(state);
-  if (!response) {
+async function runFloraAutonomous() {
+  if (floraRunning) return;
+  floraRunning = true;
+  setFloraState('thinking');
+  appendChatMsg(`[FLORA autonomous scan — Sol ${state.mission.currentSol}]`, 'system');
+
+  try {
+    // Fire-and-forget: Lambda applies actions server-side even if HTTP times out
+    const result = await runAutonomousScan(state);
+
+    if (result && result.autoActions.length > 0) {
+      // If response came back in time, also apply client-side for instant feedback
+      state = applyActions(state, result.autoActions);
+      saveState(state);
+    }
+
+    if (result?.summary) {
+      appendChatMsg(result.summary, 'agent');
+    } else {
+      appendChatMsg('FLORA is analyzing the greenhouse state...', 'system');
+    }
+
     setFloraState('idle');
-    return;
+    render();
+  } catch (err) {
+    appendChatMsg('FLORA analysis running in background...', 'system');
+    setFloraState('idle');
   }
 
-  appendChatMsg(response, 'agent');
-  setFloraState('idle');
+  floraRunning = false;
+}
 
-  // Check for executable actions
-  const actions = parseActions(response);
-  if (actions.length > 0) {
-    const msgs = document.getElementById('d-messages');
-    if (msgs) {
-      const id = 'proactive-' + Date.now();
-      msgs.innerHTML += `<div class="d-msg d-msg-action" id="${id}"><div class="d-msg-text">
-        <strong>FLORA recommends ${actions.length} action(s)</strong>
-        <button class="d-btn d-btn-apply" id="${id}-btn">Apply</button>
-      </div></div>`;
-      msgs.scrollTop = msgs.scrollHeight;
-      document.getElementById(`${id}-btn`).onclick = () => {
-        state = applyActions(state, actions);
-        saveState(state);
-        render();
-      };
+// Check for new floraLog entries from server (Lambda writes these directly)
+function checkFloraLog() {
+  const log = state.floraLog || [];
+  if (log.length > lastFloraLogLen) {
+    const newEntries = log.slice(lastFloraLogLen);
+    lastFloraLogLen = log.length;
+    for (const entry of newEntries) {
+      if (entry.actions && entry.actions.length > 0) {
+        const summary = entry.actions.map(a => {
+          if (a.type === 'plant') return `Planted ${a.crop} in Module ${a.module} (${a.area_m2}m²)`;
+          if (a.type === 'adjust_temperature') return `Set Module ${a.module} temp to ${a.value}°C`;
+          return `${a.type} on Module ${a.module}`;
+        }).join(', ');
+        appendChatMsg(`**FLORA acted on Sol ${entry.sol}:** ${summary}`, 'agent');
+      }
+      if (entry.response) {
+        // Show truncated reasoning
+        const short = entry.response.replace(/```json[\s\S]*?```/g, '').trim().slice(0, 300);
+        if (short) appendChatMsg(short, 'agent');
+      }
     }
   }
+}
+
+// ── Calorie Chart (Chart.js) ─────────────────────────────────────────
+let calChart = null;
+function drawCalorieChart() {
+  const canvas = document.getElementById('cal-canvas');
+  if (!canvas) return;
+  const hist = state.nutrition?.history || [];
+  if (hist.length < 2) return;
+
+  if (calChart) { calChart.destroy(); calChart = null; }
+
+  calChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: hist.map(h => `Sol ${h.sol}`),
+      datasets: [
+        {
+          label: 'Consumed',
+          data: hist.map(h => h.consumed),
+          borderColor: '#1a1a1a',
+          backgroundColor: 'rgba(26,26,26,0.07)',
+          borderWidth: 2,
+          pointRadius: 3,
+          pointBackgroundColor: '#1a1a1a',
+          fill: true,
+          tension: 0.3,
+        },
+        {
+          label: 'Need',
+          data: hist.map(h => h.need),
+          borderColor: '#b0ada8',
+          borderWidth: 1.5,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          fill: false,
+          tension: 0,
+        },
+        {
+          label: 'Stored (÷5)',
+          data: hist.map(h => (h.stored || 0) / 5),
+          borderColor: '#15803d',
+          borderWidth: 1.5,
+          pointRadius: 2,
+          pointBackgroundColor: '#15803d',
+          fill: false,
+          tension: 0.3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { font: { family: "'DM Mono', monospace", size: 10 }, boxWidth: 14, boxHeight: 2, padding: 12, color: '#888580' },
+        },
+        tooltip: {
+          backgroundColor: '#1a1a1a',
+          titleFont: { family: "'DM Mono', monospace", size: 11 },
+          bodyFont: { family: "'DM Mono', monospace", size: 10 },
+          padding: 10,
+          cornerRadius: 2,
+          callbacks: {
+            label: (ctx) => {
+              const idx = ctx.dataIndex;
+              const d = hist[idx];
+              if (ctx.datasetIndex === 0) return `Consumed: ${d.consumed.toLocaleString()} kcal`;
+              if (ctx.datasetIndex === 1) return `Need: ${d.need.toLocaleString()} kcal`;
+              return `Stored: ${(d.stored || 0).toLocaleString()} kcal`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: '#e8e5e0' },
+          ticks: { font: { family: "'DM Mono', monospace", size: 9 }, color: '#b0ada8', maxRotation: 0 },
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: '#e8e5e0' },
+          ticks: {
+            font: { family: "'DM Mono', monospace", size: 9 }, color: '#b0ada8',
+            callback: (v) => v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v,
+          },
+        },
+      },
+    },
+  });
 }
 
 // ── Render Dashboard ─────────────────────────────────────────────────
 function render() {
   const d = document.getElementById('dashboard');
+
+  // ── Start screen (before simulation begins) ──
+  // Guard against incomplete state from server — fill ALL missing fields with defaults
+  if (!state.mission) state.mission = { name: 'Asterion Four', currentSol: 1, totalSols: 450, crew: 4, phase: 'Pre-planting', morale: 80, started: false };
+  if (!state.modules) state.modules = [];
+  for (const m of state.modules) { if (!m.crops) m.crops = []; } // ensure every module has crops array
+  if (!state.resources) state.resources = { water_liters: 5000, water_recycling_efficiency: 0.92, energy_kwh_daily: 200, energy_stored_kwh: 800, solar_efficiency: 1.0, co2_kg: 50 };
+  if (!state.energy) state.energy = { solar_production: 0, led_consumption: 0, hvac_consumption: 0, systems_consumption: 40, crew_consumption: 20, balance: 0 };
+  if (!state.nutrition) state.nutrition = { daily_target_kcal: 10000, daily_target_protein_g: 220, current_daily_kcal: 0, current_daily_protein_g: 0, coverage_percent: 0, food_reserves_days: 30, food_stored_kcal: 0, food_stored_protein: 0 };
+  if (!state.crew) state.crew = { daily_water_need: 22, daily_kcal_need: 10000, daily_protein_need: 220, members: [] };
+  if (!state.crew.members) state.crew.members = [];
+  if (!state.genetics) state.genetics = { mutations: [], totalRadiationEvents: 0 };
+  if (!state.harvests) state.harvests = [];
+  if (!state.events) state.events = [];
+  if (!state.agentActions) state.agentActions = [];
+
+  if (!state.mission.started) {
+    d.innerHTML = `
+      <div class="start-screen" id="start-screen">
+        <div class="start-content">
+          <div class="start-logo">FLORA</div>
+          <div class="start-sub">Frontier Life-support Operations & Resource Agent</div>
+          <div class="start-desc">Autonomous greenhouse management for the Asterion Four Mars habitat</div>
+          <button class="start-btn" id="start-btn">Initialize Mission</button>
+          <div class="start-meta">450-day surface mission · Valles Marineris · 4 crew</div>
+        </div>
+      </div>`;
+    document.getElementById('start-btn').onclick = () => {
+      const screen = document.getElementById('start-screen');
+      screen.classList.add('start-booting');
+      let flickers = 0;
+      const interval = setInterval(() => {
+        screen.style.opacity = Math.random() > 0.5 ? '1' : '0.3';
+        flickers++;
+        if (flickers > 8) {
+          clearInterval(interval);
+          screen.style.opacity = '1';
+          state.mission.started = true;
+          saveState(state);
+          render();
+        }
+      }, 100);
+    };
+    return;
+  }
+
   const totalCrops = state.modules.reduce((s, m) => s + m.crops.length, 0);
   const usedArea = state.modules.reduce((s, m) => s + m.crops.reduce((a, c) => a + c.area_m2, 0), 0);
   const totalArea = state.modules.reduce((s, m) => s + m.area_m2, 0);
@@ -809,7 +1087,6 @@ function render() {
       <aside class="d-sidebar">
         <div class="d-sidebar-header">
           <span class="d-logo-text" id="logo-home" style="cursor:pointer">FLORA</span>
-          <span class="d-sol">SOL ${state.mission.currentSol}<span class="d-sol-total">/${state.mission.totalSols}</span></span>
         </div>
 
         <div class="d-sidebar-tab ${activeTab === 'metrics' ? 'active' : ''}" data-tab="metrics">
@@ -828,17 +1105,27 @@ function render() {
           </div>
         </div>
 
+        <div class="d-sidebar-tab ${activeTab === 'crew' ? 'active' : ''} ${(state.crew?.members || []).some(m => !m.alive || m.health < 50) ? 'd-sidebar-event' : ''}" data-tab="crew">
+          <div class="d-module-header">
+            <span class="d-module-name">Crew</span>
+            <span class="d-module-area">${(state.crew?.members || []).filter(m => m.alive).length}/${(state.crew?.members || []).length}</span>
+          </div>
+          <div class="d-module-env">${(state.crew?.members || []).filter(m => m.alive).map(m => m.name.split(' ').pop()).join(' · ')}</div>
+        </div>
+
         ${state.modules.map((m, i) => {
           const used = m.crops.reduce((s, c) => s + c.area_m2, 0);
           const avgHealth = m.crops.length > 0 ? Math.round(m.crops.reduce((s, c) => s + (c.health || 100), 0) / m.crops.length) : 0;
           const hasEvent = (state.events || []).some(e => e.module === m.id);
+          const isOnline = !m.onlineSol || state.mission.currentSol >= m.onlineSol;
           return `
           <div class="d-sidebar-tab ${activeTab === 'module-' + i ? 'active' : ''} ${hasEvent ? 'd-sidebar-event' : ''}" data-tab="module-${i}">
             <div class="d-module-header">
+              <span class="d-module-status ${isOnline ? 'd-status-online' : 'd-status-offline'}"></span>
               <span class="d-module-name">${hasEvent ? '! ' : ''}${m.name}</span>
-              <span class="d-module-area">${used}/${m.area_m2}m²</span>
+              <span class="d-module-area">${isOnline ? `${used}/${m.area_m2}m²` : 'OFFLINE'}</span>
             </div>
-            <div class="d-module-env">${m.temp}°C &middot; ${m.crops.length} crop${m.crops.length !== 1 ? 's' : ''}${m.crops.length > 0 ? ` &middot; ${avgHealth}% health` : ''}</div>
+            <div class="d-module-env">${isOnline ? `${m.temp}°C &middot; ${m.crops.length} crop${m.crops.length !== 1 ? 's' : ''}${m.crops.length > 0 ? ` &middot; ${avgHealth}% health` : ''}` : `Deploying Sol ${m.onlineSol}...`}</div>
           </div>`;
         }).join('')}
 
@@ -865,23 +1152,25 @@ function render() {
           <div class="d-module-env">${state.harvests.length} recorded</div>
         </div>` : ''}
 
-        <div class="d-sidebar-footer">
-          <button class="d-btn" id="btn-a1">+1 Sol</button>
-          <button class="d-btn" id="btn-a10">+10</button>
-          <button class="d-btn" id="btn-a30">+30</button>
-        </div>
-        <div class="d-sidebar-footer">
-          <button class="d-btn d-btn-reset" id="btn-reset">Reset Simulation</button>
-        </div>
       </aside>
 
-      <!-- Center: detail panel -->
+      <!-- Center: detail panel (always shows content, defaults to metrics) -->
       <main class="d-center">
-        ${activeTab ? renderDetailPanel() : `
-          <div class="d-center-empty">
-            <div class="d-center-empty-text">Select a module from the sidebar to view details</div>
+        <div class="d-topbar">
+          <div class="d-topbar-progress"><div class="d-topbar-fill" style="width:${Math.round((state.mission.currentSol / state.mission.totalSols) * 100)}%"></div></div>
+          <span class="d-topbar-sol">SOL ${state.mission.currentSol} / ${state.mission.totalSols} · ${state.mission.phase}</span>
+          <span class="d-topbar-clock-wrap">
+            <span class="d-topbar-clock" id="d-clock">00:00</span>
+            <div class="d-speed-menu" id="d-speed-menu">
+            <div class="d-speed-opt" data-speed="0">⏸ Pause</div>
+            <div class="d-speed-opt" data-speed="1">1× Real</div>
+            <div class="d-speed-opt" data-speed="1500">1.5k×</div>
+            <div class="d-speed-opt" data-speed="5000">5k×</div>
+            <div class="d-speed-opt" data-speed="15000">15k×</div>
           </div>
-        `}
+          </span>
+        </div>
+        ${renderDetailPanel()}
       </main>
     </div>
     <div class="flora-chat-panel ${chatOpen ? 'flora-chat-open' : ''}" id="flora-chat-panel">
@@ -890,8 +1179,18 @@ function render() {
         <span class="flora-chat-state">${FLORA_STATES[floraState].label}</span>
         <button class="flora-chat-close" id="flora-chat-close">&times;</button>
       </div>
+      ${floraRunning ? '<div class="flora-status-bar"><span class="flora-status-dot"></span> Analyzing greenhouse state via knowledge base...</div>' : ''}
       <div class="d-messages" id="d-messages">
-        <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Crop planning, resource optimization, and emergency response ready.</div></div>
+        <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Autonomous greenhouse management active.</div></div>
+        ${(state.floraJournal || []).map(j => `
+          <div class="d-msg d-msg-journal">
+            <div class="d-msg-text">
+              <div class="journal-header">Sol ${j.sol}${j.next_check ? ` · next scan: Sol ${j.next_check}` : ''}</div>
+              ${j.entry}
+            </div>
+          </div>
+        `).join('')}
+        ${renderChatMessages()}
       </div>
       <div class="d-input-area">
         <button class="d-mic ${isListening ? 'active' : ''}" id="d-mic">${isListening ? '||' : 'MIC'}</button>
@@ -899,14 +1198,12 @@ function render() {
         <button class="d-send" id="d-send">&rarr;</button>
       </div>
     </div>
-    <div class="flora-fab ${chatOpen ? 'flora-fab-hidden' : ''} ${isListening ? 'flora-fab-active' : ''}" id="flora-fab">
+    <div class="flora-fab ${chatOpen ? 'flora-fab-hidden' : ''} ${isListening ? 'flora-fab-active' : ''} ${floraRunning ? 'flora-fab-thinking' : ''}" id="flora-fab">
       <div id="flora-fab-orb">${renderAvatar()}</div>
+      ${floraRunning ? '<div class="flora-fab-label">Thinking...</div>' : ''}
     </div>`;
 
   // Wire events
-  document.getElementById('btn-a1').onclick = () => advanceAndAnalyze(1);
-  document.getElementById('btn-a10').onclick = () => advanceAndAnalyze(10);
-  document.getElementById('btn-a30').onclick = () => advanceAndAnalyze(30);
   document.getElementById('d-mic').onclick = () => isListening ? stopListening() : startListening();
   document.getElementById('flora-fab').onclick = () => {
     chatOpen = true;
@@ -927,18 +1224,27 @@ function render() {
     if (e.key === 'Enter') { const v = e.target.value.trim(); if (v) { e.target.value = ''; handleSend(v); } }
   };
 
-  // Logo → back to orb view
-  document.getElementById('logo-home').onclick = () => { activeTab = null; render(); };
+  // Logo → back to metrics
+  document.getElementById('logo-home').onclick = () => { activeTab = 'metrics'; render(); };
 
-  // Reset simulation (with confirmation)
-  document.getElementById('btn-reset').onclick = () => {
-    if (confirm('Reset simulation to Sol 1? All crops, harvests, and progress will be lost.')) {
-      suppressPoll = true;
-      state = resetState(); activeTab = null; chatHistory = []; render();
-      // Re-enable polling after server DELETE has time to complete
-      setTimeout(() => { suppressPoll = false; }, 6000);
-    }
-  };
+  // Speed menu on clock click
+  const clockEl = document.getElementById('d-clock');
+  const speedMenu = document.getElementById('d-speed-menu');
+  if (clockEl && speedMenu) {
+    clockEl.onclick = (e) => { e.stopPropagation(); speedMenu.classList.toggle('open'); };
+    speedMenu.querySelectorAll('.d-speed-opt').forEach(opt => {
+      opt.onclick = () => {
+        const s = parseInt(opt.dataset.speed);
+        // Sync speed via localStorage (cross-tab communication)
+        localStorage.setItem('flora-sim-speed', String(s));
+        if (window.__flora3d) window.__flora3d.setSimSpeed(s);
+        speedMenu.classList.remove('open');
+      };
+    });
+    document.addEventListener('click', () => speedMenu.classList.remove('open'));
+  }
+
+  // Reset handled from 3D view — dashboard picks it up via polling
 
   // Tab click handlers
   document.querySelectorAll('.d-sidebar-tab').forEach(tab => {
@@ -951,7 +1257,7 @@ function render() {
 
   // Detail close button
   const closeBtn = document.getElementById('detail-close');
-  if (closeBtn) closeBtn.onclick = () => { activeTab = null; render(); };
+  if (closeBtn) closeBtn.onclick = () => { activeTab = 'metrics'; render(); };
 
   // Plant crop buttons
   state.modules.forEach((m, i) => {
@@ -968,6 +1274,9 @@ function render() {
       };
     }
   });
+
+  // Render calorie chart on Canvas (after DOM is ready)
+  drawCalorieChart();
 
   // DNA: score pending mutations with Evo 2
   const dnaBtn = document.getElementById('dna-score-btn');
@@ -1136,7 +1445,7 @@ html,body,#dashboard {
 .detail-env-row { display:flex;justify-content:space-between;font-family:var(--mono);font-size:0.68rem;padding:5px 0;border-bottom:1px solid var(--border-light); }
 .detail-crop-grid { display:flex;gap:1px;background:var(--border);border:1px solid var(--border);flex-wrap:wrap; }
 .detail-crop-card { background:var(--surface);padding:12px 14px;text-align:center;min-width:80px;flex:1; }
-.detail-crop-ascii { font-family:var(--mono);font-size:0.75rem;line-height:1.2;color:var(--text2);margin-bottom:6px; }
+.detail-crop-icon { width:36px;height:36px;object-fit:contain;margin-bottom:4px;opacity:0.7; }
 .detail-crop-card-name { font-size:0.72rem;font-weight:500; }
 .detail-crop-card-meta { font-family:var(--mono);font-size:0.52rem;color:var(--text3);margin-top:2px; }
 
@@ -1532,6 +1841,164 @@ html,body,#dashboard {
   padding:6px 0;letter-spacing:0.04em;font-style:italic;
 }
 
+/* ── Calorie chart ── */
+.cal-legend {
+  display:flex;gap:16px;margin-top:8px;
+  font-family:var(--mono);font-size:0.52rem;color:var(--text2);
+}
+.cal-swatch {
+  display:inline-block;width:12px;height:2px;vertical-align:middle;
+  margin-right:4px;border:1px solid transparent;
+}
+
+/* ── FLORA journal entries ── */
+.d-msg-journal .d-msg-text {
+  background:transparent;border:1px solid var(--border-light);border-left:2px solid var(--text2);
+  padding:8px 14px;font-size:0.72rem;line-height:1.5;
+}
+.journal-header {
+  font-family:var(--mono);font-size:0.52rem;font-weight:500;
+  text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);margin-bottom:4px;
+}
+
+/* ── FLORA FAB thinking state ── */
+.flora-fab-thinking {
+  animation:flora-fab-pulse 2s infinite;
+}
+@keyframes flora-fab-pulse {
+  0%,100% { box-shadow:0 0 0 0 rgba(168,85,247,0.3); }
+  50% { box-shadow:0 0 0 12px rgba(168,85,247,0); }
+}
+.flora-fab-label {
+  position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);
+  font-family:var(--mono);font-size:0.48rem;color:var(--text2);
+  white-space:nowrap;letter-spacing:0.06em;
+}
+
+/* ── FLORA status bar ── */
+.flora-status-bar {
+  padding:8px 28px;border-bottom:1px solid var(--border-light);
+  font-family:var(--mono);font-size:0.58rem;color:var(--text2);
+  display:flex;align-items:center;gap:8px;
+  background:rgba(34,197,94,0.04);
+}
+.flora-status-dot {
+  width:6px;height:6px;border-radius:50%;background:#22c55e;
+  animation:flora-pulse 1.5s infinite;
+}
+@keyframes flora-pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.flora-last-action {
+  padding:4px 28px;border-bottom:1px solid var(--border-light);
+  font-family:var(--mono);font-size:0.52rem;color:var(--text3);
+}
+
+/* ── Crew cards ── */
+.crew-list { display:flex;flex-direction:column;gap:6px; }
+.crew-card {
+  padding:12px 16px;border:1px solid var(--border);
+  border-left:3px solid #15803d;
+}
+.crew-card.crew-dead { opacity:0.45;border-left-color:var(--crit); }
+.crew-card-top { display:flex;gap:12px;align-items:center;margin-bottom:8px; }
+.crew-card-photo {
+  width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;
+  border:2px solid var(--border);
+}
+.crew-card-info { flex:1;min-width:0; }
+.crew-card-header { display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px; }
+.crew-card-name { font-size:0.78rem;font-weight:500; }
+.crew-card-status { font-family:var(--mono);font-size:0.52rem;font-weight:600;letter-spacing:0.06em; }
+.crew-card-role { font-family:var(--mono);font-size:0.55rem;color:var(--text2); }
+.crew-card-stats { display:flex;flex-direction:column;gap:4px; }
+.crew-stat { display:flex;align-items:center;gap:8px; }
+.crew-stat-label { font-family:var(--mono);font-size:0.52rem;color:var(--text3);min-width:80px; }
+.crew-stat-val { font-family:var(--mono);font-size:0.58rem;font-weight:500;min-width:50px;text-align:right; }
+.crew-stat .bar-track { flex:1; }
+
+/* ── Top bar (sol + clock) ── */
+.d-topbar {
+  display:flex;align-items:center;gap:12px;
+  padding:10px 28px;border-bottom:1px solid var(--border-light);
+  flex-shrink:0;
+}
+.d-topbar-progress {
+  flex:1;height:3px;background:var(--border-light);border-radius:1px;overflow:hidden;
+}
+.d-topbar-fill {
+  height:100%;background:var(--text);border-radius:1px;transition:width 0.5s;
+}
+.d-topbar-sol { font-family:var(--mono);font-size:0.58rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text2);white-space:nowrap; }
+.d-topbar-clock-wrap { position:relative; }
+.d-topbar-clock {
+  font-family:var(--mono);font-size:0.78rem;font-weight:500;letter-spacing:0.06em;
+  color:var(--text);white-space:nowrap;cursor:pointer;position:relative;
+}
+.d-topbar-clock:hover { color:var(--text2); }
+.d-speed-menu {
+  position:absolute;top:100%;right:0;margin-top:6px;
+  background:var(--surface);border:1px solid var(--border);
+  box-shadow:0 4px 12px rgba(0,0,0,0.08);
+  display:none;z-index:50;min-width:100px;
+}
+.d-speed-menu.open { display:block; }
+.d-speed-opt {
+  padding:7px 14px;font-family:var(--mono);font-size:0.6rem;
+  color:var(--text);cursor:pointer;letter-spacing:0.04em;
+  transition:background 0.1s;
+}
+.d-speed-opt:hover { background:var(--bg); }
+
+/* ── Module online/offline indicator ── */
+.d-module-status {
+  width:6px;height:6px;border-radius:50%;flex-shrink:0;
+  margin-right:4px;display:inline-block;
+}
+.d-status-online { background:#22c55e;box-shadow:0 0 4px rgba(34,197,94,0.5); }
+.d-status-offline { background:var(--text3);opacity:0.4; }
+
+/* ── Start Screen ── */
+.start-screen {
+  display:flex;align-items:center;justify-content:center;
+  width:100%;height:100%;
+  background:var(--bg);
+  transition:opacity 0.1s;
+}
+.start-content {
+  text-align:center;max-width:400px;padding:40px;
+}
+.start-logo {
+  font-family:var(--serif);font-size:3.5rem;
+  letter-spacing:-0.03em;color:var(--text);
+  margin-bottom:4px;
+}
+.start-sub {
+  font-family:var(--mono);font-size:0.6rem;
+  text-transform:uppercase;letter-spacing:0.14em;
+  color:var(--text2);margin-bottom:24px;
+}
+.start-desc {
+  font-family:var(--sans);font-size:0.82rem;
+  color:var(--text2);line-height:1.6;margin-bottom:32px;
+}
+.start-btn {
+  padding:12px 36px;
+  border:1px solid var(--text);background:var(--text);color:var(--bg);
+  font-family:var(--mono);font-size:0.72rem;font-weight:500;
+  letter-spacing:0.08em;text-transform:uppercase;
+  cursor:pointer;transition:opacity 0.15s;
+}
+.start-btn:hover { opacity:0.85; }
+.start-meta {
+  font-family:var(--mono);font-size:0.5rem;
+  color:var(--text3);margin-top:20px;letter-spacing:0.06em;
+}
+.start-booting {
+  background:#0a0a0a;color:#22c55e;
+}
+.start-booting .start-logo { color:#22c55e; }
+.start-booting .start-sub,.start-booting .start-desc,.start-booting .start-meta { color:#166534; }
+.start-booting .start-btn { display:none; }
+
 /* ── Responsive ── */
 @media(max-width:1100px) {
   .d-sidebar{width:220px}
@@ -1556,19 +2023,68 @@ document.head.appendChild(style);
 (async () => {
   const saved = await loadState();
   if (saved) {
-    // Ensure genetics field exists (for states saved before DNA feature)
     if (!saved.genetics) saved.genetics = { mutations: [], totalRadiationEvents: 0 };
     state = saved;
+    // If resuming a mission already in progress, skip start screen
+    // Ensure started flag exists for old states
+    if (!('started' in state.mission)) state.mission.started = state.mission.currentSol > 1;
   }
   render();
+
+  // Trigger initial FLORA scan if mission is running and modules are empty
+  if (state.mission.started) {
+    const emptyOnline = state.modules.some(m =>
+      (!m.onlineSol || state.mission.currentSol >= m.onlineSol) && m.crops.length === 0
+    );
+    if (emptyOnline && !floraRunning) {
+      setTimeout(() => runFloraAutonomous(), 1000);
+    }
+  }
 })();
 
+// Mars clock — reads solFraction from 3D view via localStorage
+setInterval(() => {
+  if (!state.mission.started) return;
+  const el = document.getElementById('d-clock');
+  if (!el) return;
+  const frac = parseFloat(localStorage.getItem('flora-sol-fraction') || '0');
+  const hours = Math.floor(frac * 24.65);
+  const minutes = Math.floor((frac * 24.65 - hours) * 60);
+  el.textContent = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}, 250);
+
 // Poll server for changes every 3s (cross-device sync)
+// Also triggers FLORA autonomous scans when sol advances
 setInterval(async () => {
   if (suppressPoll) return;
   const saved = await loadState();
   if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
+    const prevSol = state.mission.currentSol;
+    // Preserve started flag — never regress from true to false via polling
+    if (state.mission?.started && !saved.mission?.started) {
+      saved.mission.started = true;
+    }
     state = saved;
+    if (saved.mission.currentSol < prevSol) {
+      window.__flora3d?.resetSolFraction?.();
+    }
     render();
+    checkFloraLog(); // pick up background FLORA actions
+
+    // Check if FLORA should run after sol change
+    if (state.mission.started && saved.mission.currentSol > prevSol) {
+      const nextCheck = state.floraNextCheckSol || (lastAnalysisSol + 5);
+      const scheduledWake = state.mission.currentSol >= nextCheck;
+      const crewStarving = (state.crew?.members || []).some(m => m.alive && m.daysWithoutFood > 0);
+      const emptyOnline = state.modules.some(m =>
+        (!m.onlineSol || state.mission.currentSol >= m.onlineSol) && m.crops.length === 0
+      );
+      if (!floraRunning && (crewStarving || emptyOnline || scheduledWake)) {
+        lastAnalysisSol = state.mission.currentSol;
+        runFloraAutonomous();
+      }
+    }
   }
 }, 3000);
+
+// start/stop synced via server state polling above
