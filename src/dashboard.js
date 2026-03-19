@@ -900,19 +900,13 @@ async function runFloraAutonomous() {
       saveState(state);
     }
 
-    if (result?.summary) {
-      // Short summaries go to chat, long ones just show a brief note
-      const clean = result.summary.replace(/---[\s\S]*/g, '').trim();
-      if (clean.length > 0 && clean.length < 300) {
-        appendChatMsg(clean, 'agent');
-      } else if (result.autoActions?.length > 0) {
-        const brief = result.autoActions.map(a => {
-          if (a.type === 'plant') return `Planted ${a.crop}`;
-          if (a.type === 'adjust_temperature') return `Adjusted temp in ${a.module}`;
-          return a.type;
-        }).join(', ');
-        appendChatMsg(`Sol ${state.mission.currentSol}: ${brief}`, 'agent');
-      }
+    if (result?.autoActions?.length > 0) {
+      const brief = result.autoActions.map(a => {
+        if (a.type === 'plant') return `Planted ${a.crop} in ${a.module} (${a.area_m2}m²)`;
+        if (a.type === 'adjust_temperature') return `Set ${a.module} to ${a.value}°C`;
+        return `${a.type} on ${a.module}`;
+      }).join(', ');
+      appendChatMsg(`**Sol ${state.mission.currentSol}:** ${brief}`, 'agent');
     }
 
     setFloraState('idle');
@@ -937,12 +931,7 @@ function checkFloraLog() {
           if (a.type === 'adjust_temperature') return `Set Module ${a.module} temp to ${a.value}°C`;
           return `${a.type} on Module ${a.module}`;
         }).join(', ');
-        appendChatMsg(`**FLORA acted on Sol ${entry.sol}:** ${summary}`, 'agent');
-      }
-      if (entry.response) {
-        // Show truncated reasoning
-        const short = entry.response.replace(/```json[\s\S]*?```/g, '').trim().slice(0, 300);
-        if (short) appendChatMsg(short, 'agent');
+        appendChatMsg(`**Sol ${entry.sol}:** ${summary}`, 'agent');
       }
     }
   }
