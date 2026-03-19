@@ -1241,8 +1241,8 @@ function render() {
           const latest = await loadState();
           if (latest) state = latest;
         } catch {}
+        // Only change speed — don't touch solFraction or its timestamp
         state.mission.simSpeed = s;
-        state.mission.solFractionUpdatedAt = Date.now();
         saveState(state);
       };
     });

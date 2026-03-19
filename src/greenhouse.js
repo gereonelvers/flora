@@ -696,13 +696,11 @@ function applyActions(state, actions) {
   return s;
 }
 
-// ── Persistence ──────────────────────────────────────────────────────
-const STATE_KEY = 'flora-greenhouse-state';
+// ── Persistence (server only — no localStorage) ─────────────────────
 const STATE_API = 'https://lwx98cb4sg.execute-api.us-east-1.amazonaws.com/state';
 
 function saveState(state) {
   const json = JSON.stringify(state);
-  try { localStorage.setItem(STATE_KEY, json); } catch {}
   fetch(STATE_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json }).catch(() => {});
 }
 
@@ -711,22 +709,14 @@ async function loadState() {
     const res = await fetch(STATE_API);
     if (res.ok) {
       const data = await res.json();
-      if (data?.mission) {
-        localStorage.setItem(STATE_KEY, JSON.stringify(data));
-        return data;
-      }
+      if (data?.mission) return data;
     }
-  } catch {}
-  try {
-    const saved = localStorage.getItem(STATE_KEY);
-    if (saved) return JSON.parse(saved);
   } catch {}
   return null;
 }
 
 function resetState() {
   const fresh = createInitialState();
-  try { localStorage.setItem(STATE_KEY, JSON.stringify(fresh)); } catch {}
   fetch(STATE_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fresh) }).catch(() => {});
   return fresh;
 }

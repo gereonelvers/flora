@@ -69,14 +69,37 @@ function readFromServer() {
   }
 }
 
-// Write state to server (via ui.js) — called every 2s while running
-function writeToServer() {
-  const s = window.__floraUI?.getState?.();
-  if (!s?.mission) return;
-  s.mission.simSpeed = simSpeed;
-  s.mission.solFraction = solFraction;
-  s.mission.solFractionUpdatedAt = Date.now();
-  window.__floraUI?.saveState?.(s);
+// Write time to server — fetches latest state first to avoid overwriting
+// simSpeed changes from the dashboard (cross-device sync).
+const STATE_API = 'https://lwx98cb4sg.execute-api.us-east-1.amazonaws.com/state';
+let writeInProgress = false;
+
+async function writeToServer() {
+  if (writeInProgress) return;
+  writeInProgress = true;
+  try {
+    // Fetch latest server state so we don't overwrite dashboard's simSpeed
+    const res = await fetch(STATE_API);
+    if (!res.ok) return;
+    const latest = await res.json();
+    if (!latest?.mission) return;
+
+    // Sync simSpeed FROM server (dashboard may have changed it)
+    if (latest.mission.simSpeed != null) simSpeed = latest.mission.simSpeed;
+
+    // Only write our time fields
+    latest.mission.solFraction = solFraction;
+    latest.mission.solFractionUpdatedAt = Date.now();
+
+    // Update local state and persist
+    if (window.__floraUI?.saveState) {
+      window.__floraUI.saveState(latest);
+    } else {
+      fetch(STATE_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(latest) }).catch(() => {});
+    }
+  } catch {} finally {
+    writeInProgress = false;
+  }
 }
 
 // ── Expose controls ──────────────────────────────────────────────────
@@ -84,7 +107,14 @@ window.__flora3d = {
   getSimSpeed: () => simSpeed,
   setSimSpeed: (s) => {
     simSpeed = s;
-    writeToServer();
+    // Write speed + current time to server
+    const st = window.__floraUI?.getState?.();
+    if (st?.mission) {
+      st.mission.simSpeed = s;
+      st.mission.solFraction = solFraction;
+      st.mission.solFractionUpdatedAt = Date.now();
+      window.__floraUI?.saveState?.(st);
+    }
   },
   getSolFraction: () => solFraction,
   resetSolFraction: () => {
