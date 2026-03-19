@@ -4,9 +4,9 @@
  */
 
 import { sendToAgent, parseActions } from './agent-client.js';
-import { createInitialState, advanceSol, applyActions, CROP_DB } from './greenhouse.js';
+import { createInitialState, advanceSol, applyActions, saveState, loadState, resetState, CROP_DB } from './greenhouse.js';
 
-let state = createInitialState();
+let state = loadState() || createInitialState();
 let chatHistory = [];
 
 // ── Markdown-lite renderer ──────────────────────────────────────────
@@ -112,9 +112,9 @@ export function initUI() {
   sendBtn.addEventListener('click', doSend);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
 
-  document.getElementById('btn-advance-1').addEventListener('click', () => { state = advanceSol(state, 1); updateHUD(); });
-  document.getElementById('btn-advance-10').addEventListener('click', () => { state = advanceSol(state, 10); updateHUD(); });
-  document.getElementById('btn-advance-30').addEventListener('click', () => { state = advanceSol(state, 30); updateHUD(); });
+  document.getElementById('btn-advance-1').addEventListener('click', () => { state = advanceSol(state, 1); saveState(state); updateHUD(); });
+  document.getElementById('btn-advance-10').addEventListener('click', () => { state = advanceSol(state, 10); saveState(state); updateHUD(); });
+  document.getElementById('btn-advance-30').addEventListener('click', () => { state = advanceSol(state, 30); saveState(state); updateHUD(); });
   document.getElementById('btn-auto-plant').addEventListener('click', () => {
     handleUserMessage('Analyze the current greenhouse state and recommend an optimal crop plan. Provide actions I can execute.');
   });
@@ -127,8 +127,15 @@ export function initUI() {
     icon.textContent = body.classList.contains('collapsed') ? '▲' : '▼';
   });
 
+  // Sync state across tabs
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'flora-greenhouse-state' && e.newValue) {
+      try { state = JSON.parse(e.newValue); updateHUD(); } catch {}
+    }
+  });
+
   updateHUD();
-  return { getState: () => state, setState: (s) => { state = s; updateHUD(); } };
+  return { getState: () => state, setState: (s) => { state = s; saveState(s); updateHUD(); } };
 }
 
 // ── HUD Update ──────────────────────────────────────────────────────
@@ -211,6 +218,7 @@ async function handleUserMessage(text) {
 
       document.getElementById('apply-actions-btn').addEventListener('click', () => {
         state = applyActions(state, actions);
+        saveState(state);
         updateHUD();
         actionDiv.innerHTML = '<div class="chat-msg-content" style="color:#4ade80">✓ Actions applied to greenhouse</div>';
       });

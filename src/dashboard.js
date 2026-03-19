@@ -1,7 +1,7 @@
 import { sendToAgent, parseActions } from './agent-client.js';
-import { createInitialState, advanceSol, applyActions, plantCrop, CROP_DB } from './greenhouse.js';
+import { createInitialState, advanceSol, applyActions, plantCrop, saveState, loadState, resetState, CROP_DB } from './greenhouse.js';
 
-let state = createInitialState();
+let state = loadState() || createInitialState();
 let chatHistory = [];
 let isListening = false;
 let floraState = 'idle'; // idle | listening | thinking | speaking | alert
@@ -592,6 +592,9 @@ function render() {
           <button class="d-btn" id="btn-a10">+10</button>
           <button class="d-btn" id="btn-a30">+30</button>
         </div>
+        <div class="d-sidebar-footer">
+          <button class="d-btn d-btn-reset" id="btn-reset">Reset Simulation</button>
+        </div>
       </aside>
 
       <!-- Center: FLORA orb OR detail panel + chat -->
@@ -612,9 +615,9 @@ function render() {
     </div>`;
 
   // Wire events
-  document.getElementById('btn-a1').onclick = () => { state = advanceSol(state, 1); render(); };
-  document.getElementById('btn-a10').onclick = () => { state = advanceSol(state, 10); render(); };
-  document.getElementById('btn-a30').onclick = () => { state = advanceSol(state, 30); render(); };
+  document.getElementById('btn-a1').onclick = () => { state = advanceSol(state, 1); saveState(state); render(); };
+  document.getElementById('btn-a10').onclick = () => { state = advanceSol(state, 10); saveState(state); render(); };
+  document.getElementById('btn-a30').onclick = () => { state = advanceSol(state, 30); saveState(state); render(); };
   document.getElementById('d-mic').onclick = () => isListening ? stopListening() : startListening();
   document.getElementById('d-send').onclick = () => {
     const v = document.getElementById('d-input').value.trim();
@@ -626,6 +629,9 @@ function render() {
 
   // Logo → back to orb view
   document.getElementById('logo-home').onclick = () => { activeTab = null; render(); };
+
+  // Reset simulation
+  document.getElementById('btn-reset').onclick = () => { state = resetState(); activeTab = null; chatHistory = []; render(); };
 
   // Tab click handlers
   document.querySelectorAll('.d-sidebar-tab').forEach(tab => {
@@ -650,6 +656,7 @@ function render() {
         const cropType = cropSelect.value;
         const area = parseInt(areaInput.value) || 4;
         state = plantCrop(state, m.id, cropType, area);
+        saveState(state);
         render();
       };
     }
@@ -684,6 +691,7 @@ async function handleSend(text) {
       </div></div>`;
       document.getElementById(`${id}-btn`).onclick = () => {
         state = applyActions(state, actions);
+        saveState(state);
         render();
       };
     }
@@ -817,6 +825,8 @@ html,body,#dashboard {
 .plant-avail { font-family:var(--mono);font-size:0.55rem;color:var(--text3); }
 .plant-btn { align-self:flex-end;background:var(--text);color:var(--bg);border-color:var(--text); }
 .plant-btn:hover { opacity:0.8;background:var(--text); }
+.d-btn-reset { flex:none;width:100%;color:var(--crit);border-color:var(--border); }
+.d-btn-reset:hover { border-color:var(--crit); }
 .detail-list { display:flex;flex-direction:column; }
 .detail-row {
   display:flex;gap:12px;align-items:baseline;
@@ -1013,4 +1023,12 @@ html,body,#dashboard {
 const style = document.createElement('style');
 style.textContent = STYLES;
 document.head.appendChild(style);
+
+// Sync state across tabs
+window.addEventListener('storage', (e) => {
+  if (e.key === 'flora-greenhouse-state' && e.newValue) {
+    try { state = JSON.parse(e.newValue); render(); } catch {}
+  }
+});
+
 render();

@@ -199,4 +199,23 @@ function applyActions(state, actions) {
   return s;
 }
 
-export { CROP_DB, createInitialState, advanceSol, plantCrop, applyActions };
+const STATE_KEY = 'flora-greenhouse-state';
+
+function saveState(state) {
+  try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch {}
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem(STATE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return null;
+}
+
+function resetState() {
+  try { localStorage.removeItem(STATE_KEY); } catch {}
+  return createInitialState();
+}
+
+export { CROP_DB, createInitialState, advanceSol, plantCrop, applyActions, saveState, loadState, resetState };
