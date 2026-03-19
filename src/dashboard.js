@@ -263,25 +263,53 @@ function bar(value, max, color = '#222') {
   return `<div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>`;
 }
 
-// ── FLORA Avatar ─────────────────────────────────────────────────────
+// ── FLORA Avatar (morphing orb, light theme) ────────────────────────
 function renderAvatar() {
   const s = FLORA_STATES[floraState];
-
-  // ASCII art plant that subtly shifts per state
-  const asciiPlants = {
-    idle:      `     .     \n    .|.    \n   .|.|.   \n  .|.|.|.  \n    |||    \n    |||    \n  ~~~~~   `,
-    listening: `     *     \n    *|*    \n   *|.|*   \n  *|.|.|*  \n    |||    \n    |||    \n  ~~~~~   `,
-    thinking:  `     .     \n    ..     \n   ...     \n  ....     \n    |||    \n    |||    \n  ~~~~~   `,
-    speaking:  `     o     \n    o|o    \n   o|.|o   \n  o|.|.|o  \n    |||    \n    |||    \n  ~~~~~   `,
-    alert:     `     !     \n    !|!    \n   !|.|!   \n  !|.|.|!  \n    |||    \n    |||    \n  ~~~~~   `,
+  // Light-theme orb colors per state
+  const orbColors = {
+    idle:      ['rgba(34,197,94,0.18)','rgba(16,185,129,0.14)','rgba(74,222,128,0.22)'],
+    listening: ['rgba(59,130,246,0.22)','rgba(34,211,238,0.18)','rgba(96,165,250,0.25)'],
+    thinking:  ['rgba(120,113,108,0.18)','rgba(168,162,158,0.14)','rgba(87,83,78,0.20)'],
+    speaking:  ['rgba(34,197,94,0.25)','rgba(22,163,74,0.20)','rgba(74,222,128,0.30)'],
+    alert:     ['rgba(239,68,68,0.22)','rgba(249,115,22,0.18)','rgba(220,38,38,0.25)'],
   };
+  const [c1,c2,c3] = orbColors[floraState];
+
+  const petals = [0, 45, 90, 135, 180, 225, 270, 315];
+  const petalPaths = petals.map((angle, i) => {
+    const primary = i % 2 === 0;
+    const spread = primary ? s.petalSpread : s.petalSpread * 0.7;
+    return `<path d="M 50 50 C 30 20, 30 0, 50 -15 C 70 0, 70 20, 50 50"
+      fill="currentColor" fill-opacity="${primary ? 0.3 : 0.15}"
+      stroke="currentColor" stroke-width="${primary ? 1 : 0.5}"
+      style="transform-origin:50px 50px;transform:rotate(${angle}deg) scaleY(${spread}) scaleX(${spread * 0.8});transition:all 1.2s cubic-bezier(0.4,0,0.2,1)"/>`;
+  }).join('');
 
   return `
-    <div class="flora-indicator" style="color:${s.stateColor}">
-      <pre class="flora-ascii">${asciiPlants[floraState]}</pre>
+    <div class="flora-orb-wrap">
+      <div class="flora-orb-container" style="transform:scale(${s.scale});transition:transform 1s cubic-bezier(0.34,1.56,0.64,1)">
+        <div class="flora-blob blob-1" style="background:${c1}"></div>
+        <div class="flora-blob blob-2" style="background:${c2}"></div>
+        <div class="flora-blob blob-3" style="background:${c3}">
+          <div class="flora-lotus" style="transform:rotate(${s.rotation}deg);transition:transform 1.2s cubic-bezier(0.34,1.56,0.64,1)">
+            <svg viewBox="-20 -20 140 140" class="flora-svg">
+              <g>${petalPaths}</g>
+              <circle cx="50" cy="50" r="7" fill="currentColor" opacity="0.4"/>
+              <circle cx="50" cy="50" r="13" fill="none" stroke="currentColor" stroke-width="0.5"
+                stroke-dasharray="3 3" class="flora-orbit-inner"
+                style="animation-duration:${floraState === 'thinking' ? '2s' : '8s'};
+                       animation-direction:${floraState === 'thinking' ? 'reverse' : 'normal'}"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="flora-ring" style="animation-duration:${s.ringSpeed}s">
+        <div class="flora-ring-dot" style="background:${s.stateColor}"></div>
+      </div>
     </div>
     <div class="flora-status">
-      <div class="flora-status-label" style="color:${s.stateColor}">${s.label}</div>
+      <div class="flora-status-label">${s.label}</div>
       <div class="flora-status-sub">${s.sub}</div>
     </div>`;
 }
@@ -304,96 +332,76 @@ function render() {
 
   d.innerHTML = `
     <div class="d-layout">
-      <header class="d-header">
-        <div class="d-logo">
+      <!-- Narrow data sidebar -->
+      <aside class="d-sidebar">
+        <div class="d-sidebar-header">
           <span class="d-logo-text">FLORA</span>
-          <span class="d-logo-sub">Frontier Life-support Operations & Resource Agent</span>
-        </div>
-        <div class="d-header-center">
           <span class="d-sol">SOL ${state.mission.currentSol}<span class="d-sol-total">/${state.mission.totalSols}</span></span>
-          <span class="d-phase">${state.mission.phase}</span>
         </div>
-        <div class="d-header-right">
-          <button class="d-btn" id="btn-a1">+1</button>
+
+        <div class="d-sidebar-section">
+          <div class="d-metric">
+            <div class="d-metric-head"><span class="d-metric-label">Mission</span><span class="d-metric-value">${missionPct}%</span></div>
+            ${bar(state.mission.currentSol, state.mission.totalSols, '#1a1a1a')}
+          </div>
+          <div class="d-metric">
+            <div class="d-metric-head"><span class="d-metric-label">Nutrition</span><span class="d-metric-value ${state.nutrition.coverage_percent >= 80 ? '' : state.nutrition.coverage_percent >= 50 ? 'warn' : 'crit'}">${state.nutrition.coverage_percent}%</span></div>
+            ${bar(state.nutrition.coverage_percent, 100, state.nutrition.coverage_percent >= 80 ? '#1a1a1a' : state.nutrition.coverage_percent >= 50 ? '#92400e' : '#991b1b')}
+            <div class="d-metric-detail">${state.nutrition.current_daily_kcal} / ${state.nutrition.daily_target_kcal} kcal</div>
+          </div>
+          <div class="d-metric">
+            <div class="d-metric-head"><span class="d-metric-label">Water</span><span class="d-metric-value ${waterPct > 40 ? '' : waterPct > 20 ? 'warn' : 'crit'}">${Math.round(state.resources.water_liters)}L</span></div>
+            ${bar(state.resources.water_liters, 5000, waterPct > 40 ? '#1a1a1a' : waterPct > 20 ? '#92400e' : '#991b1b')}
+          </div>
+          <div class="d-metric">
+            <div class="d-metric-head"><span class="d-metric-label">Area</span><span class="d-metric-value">${usedArea}/${totalArea}m²</span></div>
+            ${bar(usedArea, totalArea, '#1a1a1a')}
+          </div>
+        </div>
+
+        ${state.modules.map(m => {
+          const used = m.crops.reduce((s, c) => s + c.area_m2, 0);
+          return `
+          <div class="d-sidebar-section">
+            <div class="d-module-header">
+              <span class="d-module-name">${m.name}</span>
+              <span class="d-module-area">${used}/${m.area_m2}m²</span>
+            </div>
+            <div class="d-module-env">${m.temp}°C &middot; ${m.humidity}% &middot; ${m.light}µmol</div>
+            ${m.crops.length === 0 ? '<div class="d-crop-empty">no crops</div>' :
+              m.crops.map(c => {
+                const info = CROP_DB[c.type];
+                const pct = Math.round((c.daysGrown / info.cycle) * 100);
+                return `<div class="d-crop">
+                  <div class="d-crop-top"><span class="d-crop-name">${info.name}</span><span class="d-crop-pct">${pct}%</span></div>
+                  ${bar(c.daysGrown, info.cycle, '#1a1a1a')}
+                </div>`;
+              }).join('')}
+          </div>`;
+        }).join('')}
+
+        ${state.alerts.length > 0 ? `<div class="d-sidebar-section d-sidebar-alert">${state.alerts.map(a =>
+          `<div class="d-alert">Sol ${a.sol} — ${a.message}</div>`).join('')}</div>` : ''}
+
+        <div class="d-sidebar-footer">
+          <button class="d-btn" id="btn-a1">+1 Sol</button>
           <button class="d-btn" id="btn-a10">+10</button>
           <button class="d-btn" id="btn-a30">+30</button>
         </div>
-      </header>
+      </aside>
 
-      <div class="d-main">
-        <div class="d-left">
-          <div class="d-metrics">
-            <div class="d-metric">
-              <div class="d-metric-head"><span class="d-metric-label">Mission</span><span class="d-metric-value">${missionPct}%</span></div>
-              ${bar(state.mission.currentSol, state.mission.totalSols, '#1a1a1a')}
-              <div class="d-metric-detail">${state.mission.totalSols - state.mission.currentSol} sols remaining</div>
-            </div>
-            <div class="d-metric">
-              <div class="d-metric-head"><span class="d-metric-label">Nutrition</span><span class="d-metric-value ${state.nutrition.coverage_percent >= 80 ? '' : state.nutrition.coverage_percent >= 50 ? 'warn' : 'crit'}">${state.nutrition.coverage_percent}%</span></div>
-              ${bar(state.nutrition.coverage_percent, 100, state.nutrition.coverage_percent >= 80 ? '#1a1a1a' : state.nutrition.coverage_percent >= 50 ? '#92400e' : '#991b1b')}
-              <div class="d-metric-detail">${state.nutrition.current_daily_kcal} kcal / ${state.nutrition.daily_target_kcal} target</div>
-            </div>
-            <div class="d-metric">
-              <div class="d-metric-head"><span class="d-metric-label">Water Reserve</span><span class="d-metric-value ${waterPct > 40 ? '' : waterPct > 20 ? 'warn' : 'crit'}">${Math.round(state.resources.water_liters)}L</span></div>
-              ${bar(state.resources.water_liters, 5000, waterPct > 40 ? '#1a1a1a' : waterPct > 20 ? '#92400e' : '#991b1b')}
-            </div>
-            <div class="d-metric">
-              <div class="d-metric-head"><span class="d-metric-label">Cultivation</span><span class="d-metric-value">${usedArea}/${totalArea} m²</span></div>
-              ${bar(usedArea, totalArea, '#1a1a1a')}
-              <div class="d-metric-detail">${totalCrops} active crop${totalCrops !== 1 ? 's' : ''}</div>
-            </div>
-          </div>
-
-          <div class="d-modules">
-            ${state.modules.map(m => {
-              const used = m.crops.reduce((s, c) => s + c.area_m2, 0);
-              return `
-              <div class="d-module">
-                <div class="d-module-header">
-                  <span class="d-module-name">${m.name}</span>
-                  <span class="d-module-area">${used}/${m.area_m2} m²</span>
-                </div>
-                <div class="d-module-env">
-                  ${m.temp}°C &middot; ${m.humidity}% RH &middot; ${m.light} µmol &middot; ${m.co2} ppm CO₂
-                </div>
-                <div class="d-crops">
-                  ${m.crops.length === 0 ? '<div class="d-crop-empty">— no crops —</div>' :
-                    m.crops.map(c => {
-                      const info = CROP_DB[c.type];
-                      const pct = Math.round((c.daysGrown / info.cycle) * 100);
-                      return `<div class="d-crop">
-                        <div class="d-crop-top"><span class="d-crop-name">${info.name}</span><span class="d-crop-pct">${pct}%</span></div>
-                        ${bar(c.daysGrown, info.cycle, '#1a1a1a')}
-                        <div class="d-crop-detail">${c.area_m2} m² &middot; ${info.cycle - c.daysGrown}d to harvest</div>
-                      </div>`;
-                    }).join('')}
-                </div>
-              </div>`;
-            }).join('')}
-          </div>
-
-          ${state.harvests.length > 0 ? `<div class="d-harvests"><div class="d-section-title">Harvest Log</div>
-            <div class="d-harvest-list">${state.harvests.slice(-5).reverse().map(h =>
-              `<div class="d-harvest"><span class="d-harvest-sol">Sol ${h.sol}</span> ${h.crop} — ${h.yield_kg} kg</div>`).join('')}
-            </div></div>` : ''}
-
-          ${state.alerts.length > 0 ? `<div class="d-alerts">${state.alerts.map(a =>
-            `<div class="d-alert">Sol ${a.sol} — ${a.message}</div>`).join('')}</div>` : ''}
+      <!-- Center: FLORA orb hero + chat -->
+      <main class="d-center">
+        <div id="flora-avatar" class="flora-avatar-section">${renderAvatar()}</div>
+        <div class="d-messages" id="d-messages">
+          <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Crop planning, resource optimization, and emergency response ready.</div></div>
         </div>
-
-        <!-- Right: FLORA + Chat -->
-        <div class="d-right">
-          <div id="flora-avatar" class="flora-avatar-section">${renderAvatar()}</div>
-          <div class="d-messages" id="d-messages">
-            <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Crop planning, resource analysis, and emergency response ready. How can I assist?</div></div>
-          </div>
-          <div class="d-input-area">
-            <button class="d-mic ${isListening ? 'active' : ''}" id="d-mic">${isListening ? '||' : 'MIC'}</button>
-            <input type="text" id="d-input" placeholder="Query FLORA..." autocomplete="off" />
-            <button class="d-send" id="d-send">&rarr;</button>
-          </div>
+        <div class="d-input-area">
+          <button class="d-mic ${isListening ? 'active' : ''}" id="d-mic">${isListening ? '||' : 'MIC'}</button>
+          <input type="text" id="d-input" placeholder="Query FLORA..." autocomplete="off" />
+          <button class="d-send" id="d-send">&rarr;</button>
         </div>
-      </div>
+      </main>
     </div>`;
 
   // Wire events
@@ -477,223 +485,167 @@ html,body,#dashboard {
   font-size:14px;
 }
 
-/* ── Layout ── */
-.d-layout { display:flex;flex-direction:column;height:100%; }
+/* ── Layout: sidebar + center ── */
+.d-layout { display:flex;height:100%; }
 
-/* ── Header ── */
-.d-header {
-  display:flex;align-items:center;justify-content:space-between;
-  padding:12px 28px;
-  border-bottom:1px solid var(--border);
+/* ── Sidebar ── */
+.d-sidebar {
+  width:260px;flex-shrink:0;
+  border-right:1px solid var(--border);
   background:var(--surface);
-  flex-shrink:0;
+  display:flex;flex-direction:column;
+  overflow-y:auto;
 }
-.d-logo { display:flex;align-items:baseline;gap:12px; }
+.d-sidebar-header {
+  padding:16px 18px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:baseline;justify-content:space-between;
+}
 .d-logo-text {
   font-family:var(--serif);
-  font-size:1.6rem;
+  font-size:1.5rem;
   letter-spacing:-0.02em;
-  color:var(--text);
 }
-.d-logo-sub {
-  font-family:var(--mono);
-  font-size:0.6rem;
-  color:var(--text3);
-  letter-spacing:0.02em;
-}
-.d-header-center {
-  display:flex;align-items:baseline;gap:16px;
-}
-.d-sol {
-  font-family:var(--mono);
-  font-size:1.1rem;font-weight:500;
-  letter-spacing:0.04em;
-}
+.d-sol { font-family:var(--mono);font-size:0.75rem;font-weight:500;letter-spacing:0.04em; }
 .d-sol-total { color:var(--text3);font-weight:300; }
-.d-phase {
-  font-family:var(--mono);
-  font-size:0.65rem;
-  text-transform:uppercase;
-  letter-spacing:0.12em;
-  color:var(--text2);
-  padding:2px 10px;
-  border:1px solid var(--border);
-}
-.d-header-right { display:flex;gap:4px; }
 
-/* ── Buttons ── */
-.d-btn {
-  padding:5px 14px;
-  border:1px solid var(--border);
-  background:transparent;
-  color:var(--text);
-  font-family:var(--mono);
-  font-size:0.68rem;
-  cursor:pointer;
-  transition:background 0.15s;
-  letter-spacing:0.04em;
+.d-sidebar-section {
+  padding:14px 18px;
+  border-bottom:1px solid var(--border-light);
+  display:flex;flex-direction:column;gap:8px;
 }
-.d-btn:hover { background:var(--border-light); }
-.d-btn-apply {
-  margin-left:16px;
-  padding:3px 12px;
-  border:1px solid var(--text);
-  background:var(--text);
-  color:var(--bg);
-  font-family:var(--mono);
-  font-size:0.65rem;
-  cursor:pointer;
-  letter-spacing:0.04em;
-}
-.d-btn-apply:hover { opacity:0.8; }
-
-/* ── Main ── */
-.d-main { display:flex;flex:1;min-height:0; }
-
-/* ── Left ── */
-.d-left {
-  flex:1;overflow-y:auto;padding:24px 28px;
-  display:flex;flex-direction:column;gap:20px;
+.d-sidebar-alert { border-color:var(--crit); }
+.d-sidebar-footer {
+  padding:14px 18px;
+  margin-top:auto;
+  border-top:1px solid var(--border);
+  display:flex;gap:4px;
 }
 
 /* ── Metrics ── */
-.d-metrics { display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border); }
-.d-metric { background:var(--surface);padding:16px 18px; }
-.d-metric-head { display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px; }
-.d-metric-label {
-  font-family:var(--mono);
-  font-size:0.6rem;
-  text-transform:uppercase;
-  letter-spacing:0.1em;
-  color:var(--text2);
-}
-.d-metric-value {
-  font-family:var(--mono);
-  font-size:1.1rem;
-  font-weight:500;
-}
+.d-metric {}
+.d-metric-head { display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px; }
+.d-metric-label { font-family:var(--mono);font-size:0.58rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text2); }
+.d-metric-value { font-family:var(--mono);font-size:0.85rem;font-weight:500; }
 .d-metric-value.warn { color:var(--warn); }
 .d-metric-value.crit { color:var(--crit); }
-.d-metric-detail { font-family:var(--mono);font-size:0.58rem;color:var(--text3);margin-top:6px; }
+.d-metric-detail { font-family:var(--mono);font-size:0.52rem;color:var(--text3);margin-top:3px; }
 
-/* ── Bars ── */
 .bar-track { height:2px;background:var(--border-light);overflow:hidden; }
 .bar-fill { height:100%;transition:width 0.4s ease; }
 
-/* ── Modules ── */
-.d-modules { display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border:1px solid var(--border); }
-.d-module { background:var(--surface);padding:16px 18px; }
-.d-module-header { display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px; }
-.d-module-name { font-family:var(--mono);font-size:0.72rem;font-weight:500;text-transform:uppercase;letter-spacing:0.06em; }
-.d-module-area { font-family:var(--mono);font-size:0.62rem;color:var(--text3); }
-.d-module-env {
-  font-family:var(--mono);font-size:0.58rem;color:var(--text2);
-  padding:6px 0 8px;margin-bottom:8px;border-bottom:1px solid var(--border-light);
-  letter-spacing:0.02em;
+/* ── Modules in sidebar ── */
+.d-module-header { display:flex;justify-content:space-between;align-items:baseline; }
+.d-module-name { font-family:var(--mono);font-size:0.62rem;font-weight:500;text-transform:uppercase;letter-spacing:0.06em; }
+.d-module-area { font-family:var(--mono);font-size:0.55rem;color:var(--text3); }
+.d-module-env { font-family:var(--mono);font-size:0.52rem;color:var(--text2);margin:3px 0 6px;letter-spacing:0.02em; }
+.d-crop { }
+.d-crop-top { display:flex;justify-content:space-between;margin-bottom:2px; }
+.d-crop-name { font-size:0.65rem;font-weight:500; }
+.d-crop-pct { font-family:var(--mono);font-size:0.55rem;color:var(--text2); }
+.d-crop-empty { font-family:var(--mono);font-size:0.55rem;color:var(--text3); }
+.d-alert { font-family:var(--mono);font-size:0.58rem;color:var(--crit); }
+
+/* ── Buttons ── */
+.d-btn {
+  padding:5px 12px;border:1px solid var(--border);background:transparent;
+  color:var(--text);font-family:var(--mono);font-size:0.62rem;
+  cursor:pointer;transition:background 0.15s;letter-spacing:0.04em;flex:1;text-align:center;
 }
-.d-crops { display:flex;flex-direction:column;gap:8px; }
-.d-crop-empty { font-family:var(--mono);font-size:0.62rem;color:var(--text3);padding:8px 0;text-align:center; }
-.d-crop-top { display:flex;justify-content:space-between;margin-bottom:3px; }
-.d-crop-name { font-size:0.72rem;font-weight:500; }
-.d-crop-pct { font-family:var(--mono);font-size:0.62rem;color:var(--text2); }
-.d-crop-detail { font-family:var(--mono);font-size:0.55rem;color:var(--text3);margin-top:3px; }
+.d-btn:hover { background:var(--border-light); }
+.d-btn-apply {
+  margin-left:16px;padding:3px 12px;border:1px solid var(--text);
+  background:var(--text);color:var(--bg);font-family:var(--mono);
+  font-size:0.6rem;cursor:pointer;letter-spacing:0.04em;
+}
+.d-btn-apply:hover { opacity:0.8; }
 
-/* ── Harvests ── */
-.d-harvests { border:1px solid var(--border);background:var(--surface);padding:16px 18px; }
-.d-section-title { font-family:var(--mono);font-size:0.6rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text2);margin-bottom:8px; }
-.d-harvest-list { display:flex;flex-direction:column;gap:3px; }
-.d-harvest { font-family:var(--mono);font-size:0.62rem;color:var(--text2); }
-.d-harvest-sol { color:var(--text); }
-
-/* ── Alerts ── */
-.d-alerts { display:flex;flex-direction:column;gap:1px;background:var(--border);border:1px solid var(--crit); }
-.d-alert { padding:10px 18px;font-family:var(--mono);font-size:0.65rem;background:var(--surface);color:var(--crit); }
-
-/* ── Right Panel ── */
-.d-right {
-  width:380px;flex-shrink:0;
-  display:flex;flex-direction:column;
-  border-left:1px solid var(--border);
-  background:var(--surface);
+/* ── Center: orb hero + chat ── */
+.d-center {
+  flex:1;display:flex;flex-direction:column;min-width:0;
 }
 
-/* ── Avatar ── */
+/* ── Orb Avatar ── */
+@keyframes morph-1{0%,100%{border-radius:60% 40% 30% 70%/60% 30% 70% 40%}50%{border-radius:30% 60% 70% 40%/50% 60% 30% 60%}}
+@keyframes morph-2{0%,100%{border-radius:40% 60% 70% 30%/40% 50% 60% 50%}50%{border-radius:70% 30% 40% 60%/60% 40% 50% 40%}}
+@keyframes morph-3{0%,100%{border-radius:70% 30% 50% 50%/30% 30% 70% 70%}50%{border-radius:30% 70% 50% 50%/70% 70% 30% 30%}}
+@keyframes orbit-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+@keyframes inner-orbit{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+
 .flora-avatar-section {
-  padding:24px;
+  padding:32px 24px 20px;
   display:flex;flex-direction:column;align-items:center;
   border-bottom:1px solid var(--border-light);
   flex-shrink:0;
 }
-.flora-indicator {
-  transition:color 0.8s ease;
+.flora-orb-wrap {
+  position:relative;width:160px;height:160px;
+  display:flex;align-items:center;justify-content:center;
 }
-.flora-ascii {
-  font-family:var(--mono);
-  font-size:0.7rem;
-  line-height:1.1;
-  text-align:center;
-  white-space:pre;
-  transition:opacity 0.5s;
-  letter-spacing:0.1em;
+.flora-orb-container {
+  position:relative;width:120px;height:120px;
+  display:flex;align-items:center;justify-content:center;
 }
-.flora-status { text-align:center;margin-top:12px; }
-.flora-status-label {
-  font-family:var(--mono);
-  font-size:0.62rem;
-  font-weight:500;
-  text-transform:uppercase;
-  letter-spacing:0.14em;
-  transition:color 0.5s;
+.flora-blob {
+  position:absolute;inset:0;
+  transition:background 0.8s ease;
 }
-.flora-status-sub {
-  font-family:var(--mono);
-  font-size:0.55rem;
-  color:var(--text3);
-  margin-top:3px;
+.blob-1 { animation:morph-1 8s ease-in-out infinite;filter:blur(16px); }
+.blob-2 { animation:morph-2 10s ease-in-out infinite reverse;filter:blur(10px);inset:8px; }
+.blob-3 {
+  animation:morph-3 7s ease-in-out infinite;inset:16px;
+  filter:blur(1px);
+  border:1px solid rgba(0,0,0,0.06);
+  display:flex;align-items:center;justify-content:center;
+  transition:background 0.8s ease;
+}
+.flora-lotus {
+  width:60px;height:60px;
+  color:rgba(0,0,0,0.35);
+}
+.flora-svg { width:100%;height:100%;overflow:visible; }
+.flora-orbit-inner { transform-origin:50px 50px;animation:inner-orbit 8s linear infinite; }
+
+.flora-ring {
+  position:absolute;inset:-6px;
+  border:1px solid var(--border-light);
+  border-radius:50%;
+  animation:orbit-spin 12s linear infinite;
+}
+.flora-ring-dot {
+  position:absolute;top:-2px;left:50%;width:4px;height:4px;margin-left:-2px;
+  border-radius:50%;transition:background 0.6s;
 }
 
+.flora-status { text-align:center;margin-top:14px; }
+.flora-status-label {
+  font-family:var(--mono);font-size:0.6rem;font-weight:500;
+  text-transform:uppercase;letter-spacing:0.14em;color:var(--text2);
+}
+.flora-status-sub { font-family:var(--mono);font-size:0.52rem;color:var(--text3);margin-top:2px; }
+
 /* ── Messages ── */
-.d-messages { flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px; }
-.d-msg { max-width:92%; }
+.d-messages {
+  flex:1;overflow-y:auto;
+  padding:20px 32px;
+  display:flex;flex-direction:column;gap:10px;
+  max-width:680px;
+  margin:0 auto;
+  width:100%;
+}
+.d-msg { max-width:88%; }
 .d-msg-user { align-self:flex-end; }
-.d-msg-user .d-msg-text {
-  background:var(--text);color:var(--bg);
-  border-radius:0;padding:10px 14px;
-}
-.d-msg-agent .d-msg-text {
-  background:transparent;
-  border:1px solid var(--border);
-  border-radius:0;padding:10px 14px;
-}
+.d-msg-user .d-msg-text { background:var(--text);color:var(--bg);padding:10px 16px; }
+.d-msg-agent .d-msg-text { background:transparent;border:1px solid var(--border);padding:10px 16px; }
 .d-msg-text { font-size:0.78rem;line-height:1.6; }
-.d-msg-text h2,.d-msg-text h3,.d-msg-text h4 { margin:6px 0 4px;font-family:var(--serif);font-size:0.9rem;font-weight:400;color:var(--text); }
+.d-msg-text h2,.d-msg-text h3,.d-msg-text h4 { margin:6px 0 4px;font-family:var(--serif);font-size:0.9rem;font-weight:400; }
 .d-msg-text strong { font-weight:600; }
 .d-msg-text li { margin-left:16px;font-size:0.75rem; }
-.d-msg-text code {
-  background:var(--border-light);padding:1px 5px;
-  font-family:var(--mono);font-size:0.68rem;
-}
-.d-code {
-  background:var(--bg);border:1px solid var(--border);
-  padding:8px 10px;
-  font-family:var(--mono);font-size:0.62rem;
-  overflow-x:auto;white-space:pre-wrap;word-break:break-word;
-}
-.d-msg-action .d-msg-text {
-  background:transparent;border:1px solid var(--text);
-  display:flex;align-items:center;justify-content:space-between;
-  padding:8px 14px;
-}
-.d-msg-error .d-msg-text {
-  background:transparent;border:1px solid var(--crit);color:var(--crit);
-  padding:10px 14px;
-}
-.d-msg-system .d-msg-text {
-  background:transparent;border:none;
-  color:var(--text3);
-  font-family:var(--mono);font-size:0.6rem;text-align:center;
-  padding:4px;letter-spacing:0.06em;
-}
+.d-msg-text code { background:var(--border-light);padding:1px 5px;font-family:var(--mono);font-size:0.68rem; }
+.d-code { background:var(--bg);border:1px solid var(--border);padding:8px 10px;font-family:var(--mono);font-size:0.62rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word; }
+.d-msg-action .d-msg-text { background:transparent;border:1px solid var(--text);display:flex;align-items:center;justify-content:space-between;padding:8px 16px; }
+.d-msg-error .d-msg-text { background:transparent;border:1px solid var(--crit);color:var(--crit);padding:10px 16px; }
+.d-msg-system .d-msg-text { background:transparent;border:none;color:var(--text3);font-family:var(--mono);font-size:0.58rem;text-align:center;padding:4px;letter-spacing:0.06em; }
 .d-msg-loading .d-msg-text { color:var(--text3);font-family:var(--mono); }
 .d-dots { animation:pulse 1.4s infinite;letter-spacing:3px; }
 @keyframes pulse { 0%,100%{opacity:0.2} 50%{opacity:1} }
@@ -703,61 +655,46 @@ html,body,#dashboard {
   display:flex;gap:0;
   border-top:1px solid var(--border);
   flex-shrink:0;
+  max-width:680px;
+  margin:0 auto;
+  width:100%;
 }
 .d-mic {
-  width:56px;
-  border:none;border-right:1px solid var(--border);
-  background:transparent;
-  color:var(--text2);
-  font-family:var(--mono);
-  font-size:0.6rem;
-  letter-spacing:0.08em;
-  cursor:pointer;
-  transition:all 0.2s;
-  flex-shrink:0;
+  width:56px;border:none;border-right:1px solid var(--border);
+  background:transparent;color:var(--text2);
+  font-family:var(--mono);font-size:0.6rem;letter-spacing:0.08em;
+  cursor:pointer;transition:all 0.2s;flex-shrink:0;
 }
 .d-mic:hover { background:var(--border-light);color:var(--text); }
-.d-mic.active {
-  background:var(--text);color:var(--bg);
-}
+.d-mic.active { background:var(--text);color:var(--bg); }
 #d-input {
-  flex:1;padding:12px 16px;
-  border:none;
-  background:transparent;
-  color:var(--text);
-  font-family:var(--sans);
-  font-size:0.8rem;
-  outline:none;
+  flex:1;padding:14px 18px;border:none;background:transparent;
+  color:var(--text);font-family:var(--sans);font-size:0.82rem;outline:none;
 }
 #d-input::placeholder { color:var(--text3); }
 .d-send {
-  width:56px;
-  border:none;border-left:1px solid var(--border);
-  background:transparent;
-  color:var(--text);
-  font-size:1rem;
-  cursor:pointer;
-  transition:background 0.15s;
-  flex-shrink:0;
+  width:56px;border:none;border-left:1px solid var(--border);
+  background:transparent;color:var(--text);font-size:1rem;
+  cursor:pointer;transition:background 0.15s;flex-shrink:0;
 }
 .d-send:hover { background:var(--border-light); }
 
 /* ── Scrollbar ── */
-.d-left::-webkit-scrollbar,.d-messages::-webkit-scrollbar { width:3px; }
-.d-left::-webkit-scrollbar-track,.d-messages::-webkit-scrollbar-track { background:transparent; }
-.d-left::-webkit-scrollbar-thumb,.d-messages::-webkit-scrollbar-thumb { background:var(--border);border-radius:0; }
+.d-sidebar::-webkit-scrollbar,.d-messages::-webkit-scrollbar { width:3px; }
+.d-sidebar::-webkit-scrollbar-track,.d-messages::-webkit-scrollbar-track { background:transparent; }
+.d-sidebar::-webkit-scrollbar-thumb,.d-messages::-webkit-scrollbar-thumb { background:var(--border);border-radius:0; }
 
 /* ── Responsive ── */
 @media(max-width:1100px) {
-  .d-metrics{grid-template-columns:repeat(2,1fr)}
-  .d-modules{grid-template-columns:1fr 1fr}
-  .d-right{width:320px}
-  .d-logo-sub{display:none}
+  .d-sidebar{width:220px}
 }
 @media(max-width:800px) {
-  .d-main{flex-direction:column}
-  .d-right{width:100%;border-left:none;border-top:1px solid var(--border);max-height:45vh}
-  .d-modules{grid-template-columns:1fr}
+  .d-layout{flex-direction:column}
+  .d-sidebar{width:100%;flex-direction:row;flex-wrap:wrap;border-right:none;border-bottom:1px solid var(--border);max-height:30vh;overflow-y:auto}
+  .d-sidebar-header{width:100%}
+  .d-sidebar-section{flex:1;min-width:200px}
+  .flora-orb-wrap{width:100px;height:100px}
+  .flora-orb-container{width:80px;height:80px}
 }
 `;
 
