@@ -840,6 +840,7 @@ function renderDetailPanel() {
             return `
             <div class="detail-crop">
               <div class="detail-crop-header">
+                <img class="detail-crop-img" src="/icons/${c.type}.png" alt="${info.name}" />
                 <span class="detail-crop-name">${info.name}</span>
                 <span class="detail-crop-pct">${pct}%${pct >= 90 ? ' READY' : ''}</span>
               </div>
@@ -1506,8 +1507,10 @@ html,body,#dashboard {
 .detail-sub { font-family:var(--mono);font-size:0.55rem;color:var(--text3);margin-top:2px; }
 .detail-crops { display:flex;flex-direction:column;gap:1px;background:var(--border);border:1px solid var(--border); }
 .detail-crop { background:var(--surface);padding:12px 16px; }
-.detail-crop-header { display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px; }
+.detail-crop-header { display:flex;align-items:center;gap:8px;margin-bottom:4px; }
+.detail-crop-img { width:28px;height:28px;object-fit:contain;flex-shrink:0; }
 .detail-crop-name { font-size:0.82rem;font-weight:500; }
+.detail-crop-pct { margin-left:auto; }
 .detail-crop-pct { font-family:var(--mono);font-size:0.72rem;color:var(--text2); }
 .detail-crop-meta { font-family:var(--mono);font-size:0.55rem;color:var(--text3);margin-top:4px; }
 .detail-empty { font-family:var(--mono);font-size:0.65rem;color:var(--text3);padding:20px 0;text-align:center; }
