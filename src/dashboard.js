@@ -1,11 +1,13 @@
 import { sendToAgent, parseActions, runProactiveAnalysis } from './agent-client.js';
 import { createInitialState, advanceSol, applyActions, plantCrop, saveState, loadState, resetState, CROP_DB } from './greenhouse.js';
+import { scorePendingMutations, getSequenceWindow, getRefBase } from './dna.js';
 
 let state = createInitialState(); // overwritten by async init below
 let chatHistory = [];
 let isListening = false;
 let floraState = 'idle'; // idle | listening | thinking | speaking | alert
-let activeTab = null; // null = orb view, 'metrics' | 'module-0' | 'module-1' | 'module-2' | 'harvests'
+let activeTab = null; // null = orb view, 'metrics' | 'module-0' | 'module-1' | 'module-2' | 'harvests' | 'dna'
+let suppressPoll = false; // suppress cross-device polling briefly after reset
 
 // ── Voice Server Connection ──────────────────────────────────────────
 const VOICE_WS_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
@@ -308,15 +310,11 @@ function renderAvatar() {
       <div class="flora-ring" style="animation-duration:${s.ringSpeed}s">
         <div class="flora-ring-dot" style="background:${s.stateColor}"></div>
       </div>
-    </div>
-    <div class="flora-status">
-      <div class="flora-status-label">${s.label}</div>
-      <div class="flora-status-sub">${s.sub}</div>
     </div>`;
 }
 
 function updateAvatar() {
-  const el = document.getElementById('flora-avatar');
+  const el = document.getElementById('flora-fab-orb');
   if (el) el.innerHTML = renderAvatar();
 }
 
@@ -488,6 +486,163 @@ function renderDetailPanel() {
       </div>`;
   }
 
+  if (activeTab === 'dna') {
+    const gen = state.genetics || { mutations: [], totalRadiationEvents: 0 };
+    const mutations = gen.mutations || [];
+    const scored = mutations.filter(m => m.scored);
+    const pending = mutations.filter(m => !m.scored);
+    const disruptive = scored.filter(m => m.interpretation === 'disruptive' || m.interpretation === 'suspicious');
+    // Helix rungs — render 2 full rotations (36 rungs) so the scroll animation loops seamlessly
+    const HELIX_COUNT = 18; // one full rotation
+    const helixRungs = Array.from({ length: HELIX_COUNT * 2 }, (_, i) => {
+      const phase = (i % HELIX_COUNT) * 20;
+      const x = Math.sin(phase * Math.PI / 180) * 28;
+      const z = Math.cos(phase * Math.PI / 180);
+      const opacity = 0.25 + z * 0.25 + 0.25;
+      const bases = ['A—T', 'T—A', 'G—C', 'C—G'];
+      return `<div class="helix-rung" style="transform:translateX(${x}px);opacity:${opacity.toFixed(2)}"><span class="helix-dot helix-l" style="transform:scale(${(0.7+z*0.3).toFixed(2)})"></span><span class="helix-bond">${bases[i % 4]}</span><span class="helix-dot helix-r" style="transform:scale(${(0.7-z*0.3+0.6).toFixed(2)})"></span></div>`;
+    }).join('');
+
+    const interpretColor = (interp) => {
+      if (interp === 'disruptive') return 'var(--crit)';
+      if (interp === 'suspicious') return 'var(--warn)';
+      if (interp === 'pending') return 'var(--text3)';
+      if (interp === 'error') return 'var(--text3)';
+      return '#15803d';
+    };
+    const interpretBg = (interp) => {
+      if (interp === 'disruptive') return 'rgba(153,27,27,0.06)';
+      if (interp === 'suspicious') return 'rgba(146,64,14,0.06)';
+      return 'transparent';
+    };
+    const interpretLabel = (interp) => {
+      if (interp === 'disruptive') return 'DISRUPTIVE — likely loss of function';
+      if (interp === 'suspicious') return 'SUSPICIOUS — may affect protein';
+      if (interp === 'neutral') return 'NEUTRAL — tolerated by model';
+      if (interp === 'favorable') return 'FAVORABLE — model prefers variant';
+      if (interp === 'pending') return 'PENDING — awaiting Evo 2 analysis';
+      if (interp === 'error') return 'ERROR — scoring failed';
+      return interp;
+    };
+    // Color-code each base in a sequence string
+    const colorSeq = (seq) => seq.split('').map(b => `<span class="dna-base-inline dna-b-${b}">${b}</span>`).join('');
+
+    const renderMutCard = (m) => {
+      const color = interpretColor(m.interpretation);
+      const bg = interpretBg(m.interpretation);
+      const refBase = m.ref || getRefBase(m.pos);
+      const sw = getSequenceWindow(m.pos, 20);
+
+      // Build the sequence display: before [REF>ALT] after
+      const seqBefore = colorSeq(sw.before);
+      const seqAfter = colorSeq(sw.after);
+      let seqMut;
+      if (m.kind === 'del') {
+        seqMut = `<span class="dna-seq-del" title="Deleted ${refBase}">${refBase}</span>`;
+      } else {
+        seqMut = `<span class="dna-seq-ref">${refBase}</span><span class="dna-seq-arrow">›</span><span class="dna-seq-alt ${m.interpretation === 'disruptive' || m.interpretation === 'suspicious' ? 'dna-seq-bad' : 'dna-seq-ok'}">${m.alt}</span>`;
+      }
+
+      // Probability bars (only for scored mutations)
+      let probBars = '';
+      if (m.scored && m.probabilities) {
+        const maxP = Math.max(...Object.values(m.probabilities));
+        probBars = `<div class="dna-prob-bars">${Object.entries(m.probabilities).map(([b, p]) => {
+          const isRef = b === refBase;
+          const isAlt = b === m.alt;
+          const pct = Math.round(p * 100);
+          const barW = Math.max(2, Math.round((p / maxP) * 100));
+          return `<div class="dna-prob-bar-row">
+            <span class="dna-prob-base dna-base-${b}">${b}</span>
+            <div class="dna-prob-bar-track"><div class="dna-prob-bar-fill dna-bar-${b}" style="width:${barW}%"></div></div>
+            <span class="dna-prob-pct">${pct.toFixed(1)}%</span>
+            ${isRef ? '<span class="dna-tag dna-tag-ref">REF</span>' : ''}${isAlt ? '<span class="dna-tag dna-tag-alt">ALT</span>' : ''}
+          </div>`;
+        }).join('')}</div>`;
+      }
+
+      return `
+        <div class="dna-mut-card" style="border-left:3px solid ${color};background:${bg}">
+          <div class="dna-mut-header">
+            <span class="dna-mut-crop">${CROP_DB[m.crop]?.name || m.crop}</span>
+            <span class="dna-mut-interp" style="color:${color}">${m.interpretation?.toUpperCase() || 'PENDING'}</span>
+            <span class="dna-mut-sol">Sol ${m.sol}</span>
+          </div>
+          <div class="dna-mut-change">
+            <span class="dna-mut-kind">${m.kind === 'del' ? 'DELETION' : 'SNV'}</span>
+            <span class="dna-mut-desc">${m.kind === 'del' ? `${refBase} deleted at` : `${refBase} → ${m.alt} at`} position ${m.pos.toLocaleString()} / 5,428</span>
+          </div>
+          <div class="dna-seq-view">
+            <span class="dna-seq-pos">${sw.start}</span>${seqBefore}${seqMut}${seqAfter}<span class="dna-seq-pos">${sw.pos + 20}</span>
+          </div>
+          ${m.scored ? `
+            <div class="dna-score-detail">
+              <div class="dna-score-row">
+                <span class="dna-score-label">Evo 2 verdict</span>
+                <span class="dna-score-verdict" style="color:${color}">${interpretLabel(m.interpretation)}</span>
+              </div>
+              <div class="dna-score-row">
+                <span class="dna-score-label">Effect score (Δ)</span>
+                <span class="dna-score-val">${m.delta_score != null ? (m.delta_score > 0 ? '+' : '') + m.delta_score.toFixed(4) : '—'}</span>
+              </div>
+              ${m.ref_log_prob != null ? `<div class="dna-score-row"><span class="dna-score-label">Ref log-prob</span><span class="dna-score-val">${m.ref_log_prob.toFixed(4)}</span></div>` : ''}
+              ${m.alt_log_prob != null ? `<div class="dna-score-row"><span class="dna-score-label">Alt log-prob</span><span class="dna-score-val">${m.alt_log_prob.toFixed(4)}</span></div>` : ''}
+            </div>
+            ${probBars}
+          ` : '<div class="dna-pending-badge">Awaiting Evo 2 scoring...</div>'}
+        </div>`;
+    };
+
+    return `
+      <div class="detail-panel">
+        <div class="detail-header">
+          <span class="detail-title">DNA Mutation Analysis</span>
+          <button class="detail-close" id="detail-close">&times;</button>
+        </div>
+        <div class="detail-sub" style="margin-bottom:16px">Evo 2 genomic foundation model scoring mutations in potato GBSS gene (X83220.1, 5,428 bp)</div>
+
+        <div class="dna-top-row">
+          <div class="dna-helix-col">
+            <div class="dna-helix-wrap">
+              <div class="dna-helix">${helixRungs}</div>
+            </div>
+            <div class="dna-helix-label">GBSS — Granule-bound starch synthase</div>
+          </div>
+          <div class="dna-stats-col">
+            <div class="detail-grid" style="grid-template-columns:1fr 1fr">
+              <div class="detail-item">
+                <div class="detail-label">Total Mutations</div>
+                <div class="detail-value">${mutations.length}</div>
+                <div class="detail-sub">${pending.length} pending analysis</div>
+              </div>
+              <div class="detail-item">
+                <div class="detail-label">Disruptive</div>
+                <div class="detail-value ${disruptive.length > 0 ? 'crit' : ''}">${disruptive.length}</div>
+                <div class="detail-sub">of ${scored.length} scored</div>
+              </div>
+              <div class="detail-item">
+                <div class="detail-label">Radiation Events</div>
+                <div class="detail-value">${gen.totalRadiationEvents}</div>
+                <div class="detail-sub">cumulative since Sol 1</div>
+              </div>
+              <div class="detail-item">
+                <div class="detail-label">Gene</div>
+                <div class="detail-value" style="font-size:0.78rem">GBSS</div>
+                <div class="detail-sub">5,428 bp · potato</div>
+              </div>
+            </div>
+            ${pending.length > 0 ? `<button class="d-btn dna-score-btn" id="dna-score-btn">Score ${pending.length} pending with Evo 2</button>` : ''}
+          </div>
+        </div>
+
+        ${mutations.length > 0 ? `
+        <div class="detail-section-title" style="margin-top:20px">Mutation Log</div>
+        <div class="dna-mutation-list">
+          ${mutations.slice().reverse().map(m => renderMutCard(m)).join('')}
+        </div>` : '<div class="detail-empty">No mutations detected yet. Advance sols — Mars radiation will cause DNA damage in crops over time.</div>'}
+      </div>`;
+  }
+
   const moduleMatch = activeTab.match(/^module-(\d+)$/);
   if (moduleMatch) {
     const mi = parseInt(moduleMatch[1]);
@@ -589,6 +744,18 @@ function advanceAndAnalyze(days) {
     lastAnalysisSol = state.mission.currentSol;
     triggerProactiveAgent();
   }
+
+  // Auto-score new DNA mutations in background
+  const pendingMuts = (state.genetics?.mutations || []).filter(m => !m.scored);
+  if (pendingMuts.length > 0) {
+    scorePendingMutations(state).then(updated => {
+      if (JSON.stringify(updated.genetics) !== JSON.stringify(state.genetics)) {
+        state = updated;
+        saveState(state);
+        render();
+      }
+    }).catch(() => {});
+  }
 }
 
 async function triggerProactiveAgent() {
@@ -674,6 +841,14 @@ function render() {
           </div>`;
         }).join('')}
 
+        <div class="d-sidebar-tab ${activeTab === 'dna' ? 'active' : ''} ${(state.genetics?.mutations || []).some(m => m.interpretation === 'disruptive') ? 'd-sidebar-event' : ''}" data-tab="dna">
+          <div class="d-module-header">
+            <span class="d-module-name">DNA Analysis</span>
+            <span class="d-module-area">${(state.genetics?.mutations || []).length} mut</span>
+          </div>
+          <div class="d-module-env">Evo 2 · GBSS gene · ${(state.genetics?.mutations || []).filter(m => !m.scored).length} pending</div>
+        </div>
+
         ${(state.events || []).length > 0 ? `<div class="d-sidebar-tab d-sidebar-alert">
           <div class="d-module-name">Active Events</div>
           ${state.events.map(e => `<div class="d-alert">${e.name} (${e.sol_end - state.mission.currentSol}d left)</div>`).join('')}
@@ -699,12 +874,9 @@ function render() {
         </div>
       </aside>
 
-      <!-- Center: FLORA orb OR detail panel + chat -->
+      <!-- Center: detail panel + chat -->
       <main class="d-center">
-        ${activeTab
-          ? renderDetailPanel()
-          : `<div id="flora-avatar" class="flora-avatar-section">${renderAvatar()}</div>`
-        }
+        ${activeTab ? renderDetailPanel() : ''}
         <div class="d-messages" id="d-messages">
           <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Crop planning, resource optimization, and emergency response ready.</div></div>
         </div>
@@ -714,6 +886,9 @@ function render() {
           <button class="d-send" id="d-send">&rarr;</button>
         </div>
       </main>
+    </div>
+    <div class="flora-fab ${isListening ? 'flora-fab-active' : ''}" id="flora-fab">
+      <div id="flora-fab-orb">${renderAvatar()}</div>
     </div>`;
 
   // Wire events
@@ -721,6 +896,7 @@ function render() {
   document.getElementById('btn-a10').onclick = () => advanceAndAnalyze(10);
   document.getElementById('btn-a30').onclick = () => advanceAndAnalyze(30);
   document.getElementById('d-mic').onclick = () => isListening ? stopListening() : startListening();
+  document.getElementById('flora-fab').onclick = () => isListening ? stopListening() : startListening();
   document.getElementById('d-send').onclick = () => {
     const v = document.getElementById('d-input').value.trim();
     if (v) { document.getElementById('d-input').value = ''; handleSend(v); }
@@ -735,7 +911,10 @@ function render() {
   // Reset simulation (with confirmation)
   document.getElementById('btn-reset').onclick = () => {
     if (confirm('Reset simulation to Sol 1? All crops, harvests, and progress will be lost.')) {
+      suppressPoll = true;
       state = resetState(); activeTab = null; chatHistory = []; render();
+      // Re-enable polling after server DELETE has time to complete
+      setTimeout(() => { suppressPoll = false; }, 6000);
     }
   };
 
@@ -767,6 +946,23 @@ function render() {
       };
     }
   });
+
+  // DNA: score pending mutations with Evo 2
+  const dnaBtn = document.getElementById('dna-score-btn');
+  if (dnaBtn) {
+    dnaBtn.onclick = async () => {
+      dnaBtn.textContent = 'Scoring with Evo 2...';
+      dnaBtn.disabled = true;
+      try {
+        state = await scorePendingMutations(state);
+        saveState(state);
+        render();
+      } catch (err) {
+        dnaBtn.textContent = 'Error — retry';
+        dnaBtn.disabled = false;
+      }
+    };
+  }
 }
 
 // ── Chat Handler ─────────────────────────────────────────────────────
@@ -999,10 +1195,31 @@ html,body,#dashboard {
 @keyframes orbit-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
 @keyframes inner-orbit{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
 
-.flora-avatar-section {
-  padding:16px 24px 12px;
-  display:flex;flex-direction:column;align-items:center;
-  border-bottom:1px solid var(--border-light);
+/* ── FLORA FAB ── */
+.flora-fab {
+  position:fixed;bottom:24px;right:24px;
+  width:60px;height:60px;border-radius:50%;
+  cursor:pointer;z-index:100;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--surface);
+  border:1px solid var(--border);
+  box-shadow:0 2px 12px rgba(0,0,0,0.08);
+  transition:box-shadow 0.3s,transform 0.2s,border-color 0.3s;
+  overflow:hidden;
+}
+.flora-fab:hover {
+  box-shadow:0 4px 20px rgba(0,0,0,0.12);
+  transform:scale(1.08);
+}
+.flora-fab-active {
+  border-color:var(--text);
+  box-shadow:0 2px 20px rgba(16,185,129,0.25);
+}
+#flora-fab-orb {
+  width:110px;height:110px;
+  transform:scale(0.52);
+  transform-origin:center;
+  pointer-events:none;
   flex-shrink:0;
 }
 .flora-orb-wrap {
@@ -1044,12 +1261,6 @@ html,body,#dashboard {
   border-radius:50%;transition:background 0.6s;
 }
 
-.flora-status { text-align:center;margin-top:14px; }
-.flora-status-label {
-  font-family:var(--mono);font-size:0.6rem;font-weight:500;
-  text-transform:uppercase;letter-spacing:0.14em;color:var(--text2);
-}
-.flora-status-sub { font-family:var(--mono);font-size:0.52rem;color:var(--text3);margin-top:2px; }
 
 /* ── Messages ── */
 .d-messages {
@@ -1111,6 +1322,135 @@ html,body,#dashboard {
 .d-sidebar::-webkit-scrollbar-track,.d-messages::-webkit-scrollbar-track { background:transparent; }
 .d-sidebar::-webkit-scrollbar-thumb,.d-messages::-webkit-scrollbar-thumb { background:var(--border);border-radius:0; }
 
+/* ── DNA Panel ── */
+.dna-top-row { display:flex;gap:24px;align-items:flex-start; }
+.dna-helix-col { flex-shrink:0;display:flex;flex-direction:column;align-items:center; }
+.dna-stats-col { flex:1;min-width:0;display:flex;flex-direction:column;gap:12px; }
+.dna-helix-wrap {
+  width:120px;height:220px;overflow:hidden;position:relative;
+  display:flex;flex-direction:column;justify-content:center;gap:2px;
+}
+.dna-helix { display:flex;flex-direction:column;gap:2px;animation:helix-scroll 6s linear infinite; }
+@keyframes helix-scroll {
+  0% { transform:translateY(0); }
+  100% { transform:translateY(-252px); }
+}
+.helix-rung {
+  display:flex;align-items:center;justify-content:center;gap:0;height:12px;
+  transition:transform 0.3s,opacity 0.3s;
+}
+.helix-dot {
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  transition:transform 0.3s;
+}
+.helix-l { background:#2563eb; }
+.helix-r { background:#dc2626; }
+.helix-bond {
+  font-family:var(--mono);font-size:0.42rem;letter-spacing:0.05em;
+  color:var(--text3);width:36px;text-align:center;flex-shrink:0;
+}
+.dna-helix-label {
+  font-family:var(--mono);font-size:0.5rem;color:var(--text3);
+  text-align:center;margin-top:8px;letter-spacing:0.06em;
+}
+.dna-score-btn {
+  width:100%;background:var(--text) !important;color:var(--bg) !important;
+  border-color:var(--text) !important;padding:8px 16px !important;
+  font-size:0.62rem !important;letter-spacing:0.06em;
+}
+.dna-score-btn:hover { opacity:0.85; }
+.dna-score-btn:disabled { opacity:0.5;cursor:wait; }
+
+.dna-mutation-list { display:flex;flex-direction:column;gap:8px; }
+.dna-mut-card {
+  padding:12px 16px;border:1px solid var(--border);
+  transition:background 0.2s;
+}
+.dna-mut-header {
+  display:flex;align-items:baseline;gap:8px;margin-bottom:6px;
+}
+.dna-mut-crop { font-size:0.75rem;font-weight:500; }
+.dna-mut-interp {
+  font-family:var(--mono);font-size:0.52rem;font-weight:600;
+  letter-spacing:0.08em;
+}
+.dna-mut-sol { font-family:var(--mono);font-size:0.55rem;color:var(--text3);margin-left:auto; }
+.dna-mut-change {
+  display:flex;align-items:baseline;gap:8px;margin-bottom:8px;
+}
+.dna-mut-kind {
+  font-family:var(--mono);font-size:0.52rem;font-weight:500;
+  padding:2px 7px;border:1px solid var(--border);letter-spacing:0.08em;
+  background:var(--bg);
+}
+.dna-mut-desc { font-family:var(--mono);font-size:0.62rem;color:var(--text2); }
+
+/* Sequence viewer with colored bases */
+.dna-seq-view {
+  font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;
+  margin-bottom:8px;padding:6px 10px;background:var(--bg);border:1px solid var(--border-light);
+  overflow-x:auto;white-space:nowrap;line-height:1.6;
+}
+.dna-seq-pos { font-size:0.48rem;color:var(--text3);margin:0 4px;vertical-align:middle; }
+.dna-base-inline { font-weight:400; }
+.dna-b-A { color:#2563eb; }
+.dna-b-T { color:#dc2626; }
+.dna-b-G { color:#15803d; }
+.dna-b-C { color:#d97706; }
+.dna-seq-ref {
+  font-weight:700;text-decoration:line-through;opacity:0.5;
+}
+.dna-seq-arrow { color:var(--text3);margin:0 1px;font-size:0.72rem; }
+.dna-seq-alt { font-weight:700;padding:0 2px; }
+.dna-seq-bad { color:#dc2626;background:rgba(220,38,38,0.1);border-radius:1px; }
+.dna-seq-ok { color:#15803d;background:rgba(21,128,61,0.1);border-radius:1px; }
+.dna-seq-del { font-weight:700;color:#dc2626;text-decoration:line-through;background:rgba(220,38,38,0.1);padding:0 2px; }
+
+/* Score details */
+.dna-score-detail {
+  display:flex;flex-direction:column;gap:2px;margin-bottom:8px;
+}
+.dna-score-row {
+  display:flex;justify-content:space-between;align-items:baseline;
+  font-family:var(--mono);font-size:0.58rem;
+  padding:2px 0;
+}
+.dna-score-label { color:var(--text3); }
+.dna-score-val { color:var(--text);font-weight:500; }
+.dna-score-verdict { font-weight:500;font-size:0.55rem; }
+
+/* Probability bars */
+.dna-prob-bars { display:flex;flex-direction:column;gap:3px; }
+.dna-prob-bar-row {
+  display:flex;align-items:center;gap:6px;
+}
+.dna-prob-base {
+  font-family:var(--mono);font-size:0.52rem;font-weight:600;
+  width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:2px;color:#fff;flex-shrink:0;
+}
+.dna-base-A { background:#2563eb; }
+.dna-base-T { background:#dc2626; }
+.dna-base-G { background:#15803d; }
+.dna-base-C { background:#d97706; }
+.dna-prob-bar-track { flex:1;height:6px;background:var(--border-light);overflow:hidden; }
+.dna-prob-bar-fill { height:100%;transition:width 0.4s; }
+.dna-bar-A { background:#2563eb; }
+.dna-bar-T { background:#dc2626; }
+.dna-bar-G { background:#15803d; }
+.dna-bar-C { background:#d97706; }
+.dna-prob-pct { font-family:var(--mono);font-size:0.52rem;color:var(--text2);min-width:36px;text-align:right; }
+.dna-tag {
+  font-family:var(--mono);font-size:0.42rem;font-weight:600;
+  padding:1px 4px;border-radius:2px;letter-spacing:0.06em;
+}
+.dna-tag-ref { background:var(--border-light);color:var(--text2); }
+.dna-tag-alt { background:rgba(220,38,38,0.1);color:#dc2626; }
+.dna-pending-badge {
+  font-family:var(--mono);font-size:0.55rem;color:var(--text3);
+  padding:6px 0;letter-spacing:0.04em;font-style:italic;
+}
+
 /* ── Responsive ── */
 @media(max-width:1100px) {
   .d-sidebar{width:220px}
@@ -1120,8 +1460,8 @@ html,body,#dashboard {
   .d-sidebar{width:100%;flex-direction:row;flex-wrap:wrap;border-right:none;border-bottom:1px solid var(--border);max-height:30vh;overflow-y:auto}
   .d-sidebar-header{width:100%}
   .d-sidebar-section{flex:1;min-width:200px}
-  .flora-orb-wrap{width:100px;height:100px}
-  .flora-orb-container{width:80px;height:80px}
+  .flora-fab{bottom:16px;right:16px;width:52px;height:52px}
+  #flora-fab-orb{transform:scale(0.44)}
 }
 `;
 
@@ -1133,12 +1473,17 @@ document.head.appendChild(style);
 // Load state from server, then render
 (async () => {
   const saved = await loadState();
-  if (saved) state = saved;
+  if (saved) {
+    // Ensure genetics field exists (for states saved before DNA feature)
+    if (!saved.genetics) saved.genetics = { mutations: [], totalRadiationEvents: 0 };
+    state = saved;
+  }
   render();
 })();
 
 // Poll server for changes every 3s (cross-device sync)
 setInterval(async () => {
+  if (suppressPoll) return;
   const saved = await loadState();
   if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
     state = saved;
