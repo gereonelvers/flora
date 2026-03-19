@@ -8,6 +8,7 @@ let isListening = false;
 let floraState = 'idle'; // idle | listening | thinking | speaking | alert
 let activeTab = null; // null = orb view, 'metrics' | 'module-0' | 'module-1' | 'module-2' | 'harvests' | 'dna'
 let suppressPoll = false; // suppress cross-device polling briefly after reset
+let chatOpen = false;
 
 // ── Voice Server Connection ──────────────────────────────────────────
 const VOICE_WS_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
@@ -874,20 +875,31 @@ function render() {
         </div>
       </aside>
 
-      <!-- Center: detail panel + chat -->
+      <!-- Center: detail panel -->
       <main class="d-center">
-        ${activeTab ? renderDetailPanel() : ''}
-        <div class="d-messages" id="d-messages">
-          <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Crop planning, resource optimization, and emergency response ready.</div></div>
-        </div>
-        <div class="d-input-area">
-          <button class="d-mic ${isListening ? 'active' : ''}" id="d-mic">${isListening ? '||' : 'MIC'}</button>
-          <input type="text" id="d-input" placeholder="Query FLORA..." autocomplete="off" />
-          <button class="d-send" id="d-send">&rarr;</button>
-        </div>
+        ${activeTab ? renderDetailPanel() : `
+          <div class="d-center-empty">
+            <div class="d-center-empty-text">Select a module from the sidebar to view details</div>
+          </div>
+        `}
       </main>
     </div>
-    <div class="flora-fab ${isListening ? 'flora-fab-active' : ''}" id="flora-fab">
+    <div class="flora-chat-panel ${chatOpen ? 'flora-chat-open' : ''}" id="flora-chat-panel">
+      <div class="flora-chat-header">
+        <span class="flora-chat-title">FLORA</span>
+        <span class="flora-chat-state">${FLORA_STATES[floraState].label}</span>
+        <button class="flora-chat-close" id="flora-chat-close">&times;</button>
+      </div>
+      <div class="d-messages" id="d-messages">
+        <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Crop planning, resource optimization, and emergency response ready.</div></div>
+      </div>
+      <div class="d-input-area">
+        <button class="d-mic ${isListening ? 'active' : ''}" id="d-mic">${isListening ? '||' : 'MIC'}</button>
+        <input type="text" id="d-input" placeholder="Query FLORA..." autocomplete="off" />
+        <button class="d-send" id="d-send">&rarr;</button>
+      </div>
+    </div>
+    <div class="flora-fab ${chatOpen ? 'flora-fab-hidden' : ''} ${isListening ? 'flora-fab-active' : ''}" id="flora-fab">
       <div id="flora-fab-orb">${renderAvatar()}</div>
     </div>`;
 
@@ -896,7 +908,17 @@ function render() {
   document.getElementById('btn-a10').onclick = () => advanceAndAnalyze(10);
   document.getElementById('btn-a30').onclick = () => advanceAndAnalyze(30);
   document.getElementById('d-mic').onclick = () => isListening ? stopListening() : startListening();
-  document.getElementById('flora-fab').onclick = () => isListening ? stopListening() : startListening();
+  document.getElementById('flora-fab').onclick = () => {
+    chatOpen = true;
+    document.getElementById('flora-chat-panel').classList.add('flora-chat-open');
+    document.getElementById('flora-fab').classList.add('flora-fab-hidden');
+    document.getElementById('d-input').focus();
+  };
+  document.getElementById('flora-chat-close').onclick = () => {
+    chatOpen = false;
+    document.getElementById('flora-chat-panel').classList.remove('flora-chat-open');
+    document.getElementById('flora-fab').classList.remove('flora-fab-hidden');
+  };
   document.getElementById('d-send').onclick = () => {
     const v = document.getElementById('d-input').value.trim();
     if (v) { document.getElementById('d-input').value = ''; handleSend(v); }
@@ -1183,9 +1205,15 @@ html,body,#dashboard {
 }
 .d-btn-apply:hover { opacity:0.8; }
 
-/* ── Center: orb hero + chat ── */
+/* ── Center ── */
 .d-center {
   flex:1;display:flex;flex-direction:column;min-width:0;
+}
+.d-center-empty {
+  flex:1;display:flex;align-items:center;justify-content:center;
+}
+.d-center-empty-text {
+  font-family:var(--mono);font-size:0.68rem;color:var(--text3);letter-spacing:0.04em;
 }
 
 /* ── Orb Avatar ── */
@@ -1214,6 +1242,59 @@ html,body,#dashboard {
 .flora-fab-active {
   border-color:var(--text);
   box-shadow:0 2px 20px rgba(16,185,129,0.25);
+}
+.flora-fab-hidden {
+  opacity:0;transform:scale(0.5);pointer-events:none;
+}
+
+/* ── FLORA Chat Panel ── */
+.flora-chat-panel {
+  position:fixed;bottom:24px;right:24px;
+  width:420px;height:520px;max-height:calc(100vh - 48px);
+  background:var(--surface);
+  border:1px solid var(--border);
+  box-shadow:0 8px 40px rgba(0,0,0,0.12);
+  display:flex;flex-direction:column;
+  z-index:99;
+  opacity:0;
+  transform:translateY(20px) scale(0.95);
+  transform-origin:bottom right;
+  pointer-events:none;
+  transition:opacity 0.25s ease,transform 0.25s ease;
+  border-radius:12px;
+  overflow:hidden;
+}
+.flora-chat-panel.flora-chat-open {
+  opacity:1;
+  transform:translateY(0) scale(1);
+  pointer-events:auto;
+}
+.flora-chat-header {
+  display:flex;align-items:center;gap:10px;
+  padding:14px 18px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.flora-chat-title {
+  font-family:var(--serif);font-size:1.1rem;
+}
+.flora-chat-state {
+  font-family:var(--mono);font-size:0.52rem;color:var(--text3);
+  text-transform:uppercase;letter-spacing:0.1em;
+}
+.flora-chat-close {
+  margin-left:auto;
+  border:1px solid var(--border);background:transparent;
+  color:var(--text2);font-size:1rem;width:28px;height:28px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  border-radius:6px;
+}
+.flora-chat-close:hover { background:var(--border-light);color:var(--text); }
+.flora-chat-panel .d-messages {
+  max-width:none;padding:16px 18px;
+}
+.flora-chat-panel .d-input-area {
+  max-width:none;border-radius:0 0 12px 12px;
 }
 #flora-fab-orb {
   width:110px;height:110px;
@@ -1462,6 +1543,7 @@ html,body,#dashboard {
   .d-sidebar-section{flex:1;min-width:200px}
   .flora-fab{bottom:16px;right:16px;width:52px;height:52px}
   #flora-fab-orb{transform:scale(0.44)}
+  .flora-chat-panel{width:calc(100vw - 32px);right:16px;bottom:16px;height:60vh}
 }
 `;
 
