@@ -141,6 +141,10 @@ function createInitialState() {
       daily_kcal_need: CREW.size * CREW.kcal_per_person_day,
       daily_protein_need: CREW.size * CREW.protein_per_person_day,
     },
+    genetics: {
+      mutations: [],            // detected DNA mutations [{id, sol, crop, gene, kind, pos, ref, alt, scored, delta_score, interpretation, probabilities}]
+      totalRadiationEvents: 0,  // cumulative radiation-induced mutations
+    },
     harvests: [],
     events: [],       // active events [{id, name, desc, sol_start, sol_end, severity, effect, module?}]
     eventLog: [],     // historical events
@@ -150,7 +154,8 @@ function createInitialState() {
 }
 
 // ── Crop stress factor (0-1, 1 = optimal) ────────────────────────────
-function cropStressFactor(crop, mod) {
+// genetics parameter is optional — when provided, scored mutations penalize yield
+function cropStressFactor(crop, mod, genetics) {
   const info = CROP_DB[crop.type];
   let stress = 1.0;
 
@@ -174,6 +179,17 @@ function cropStressFactor(crop, mod) {
 
   // CO2 benefit
   if (info.co2_boost && mod.co2 > 800) stress *= Math.min(1.15, 1 + (mod.co2 - 800) / 5000);
+
+  // DNA mutation damage — scored mutations for this crop type reduce yield
+  if (genetics?.mutations) {
+    const cropMuts = genetics.mutations.filter(m => m.crop === crop.type && m.scored);
+    let geneticPenalty = 1.0;
+    for (const m of cropMuts) {
+      if (m.interpretation === 'disruptive') geneticPenalty *= 0.92;       // 8% yield loss per disruptive mutation
+      else if (m.interpretation === 'suspicious') geneticPenalty *= 0.96;  // 4% yield loss per suspicious mutation
+    }
+    stress *= Math.max(0.5, geneticPenalty); // cap at 50% genetic damage
+  }
 
   return Math.max(0, Math.min(1.2, stress));
 }
@@ -365,7 +381,7 @@ function advanceSol(state, days = 1) {
       for (const crop of mod.crops) {
         crop.daysGrown++;
         const info = CROP_DB[crop.type];
-        const stress = cropStressFactor(crop, mod);
+        const stress = cropStressFactor(crop, mod, s.genetics);
         crop.health = Math.round(stress * 100); // store for display
 
         // Lethal conditions
@@ -407,6 +423,43 @@ function advanceSol(state, days = 1) {
     if (s.nutrition.coverage_percent < 50 && s.nutrition.food_reserves_days > 0) {
       s.nutrition.food_reserves_days = Math.max(0, s.nutrition.food_reserves_days - (1 - s.nutrition.coverage_percent / 100));
     }
+
+    // ── DNA Mutations (Mars cosmic radiation) ──
+    if (!s.genetics) s.genetics = { mutations: [], totalRadiationEvents: 0 };
+    const activeCropTypes = new Set();
+    for (const mod of s.modules) {
+      for (const crop of mod.crops) activeCropTypes.add(crop.type);
+    }
+    const hasDustStorm = s.events.some(e => e.id === 'dust_storm');
+    // Mars surface radiation ~0.67 mSv/day (vs 0.01 on Earth) — mutations accumulate
+    const mutationProb = hasDustStorm ? 0.035 : 0.018;
+    if (activeCropTypes.size > 0 && Math.random() < mutationProb) {
+      const cropTypes = Array.from(activeCropTypes);
+      const targetCrop = cropTypes[Math.floor(Math.random() * cropTypes.length)];
+      const geneLength = 5428;
+      const pos = Math.floor(Math.random() * (geneLength - 20)) + 11;
+      const kind = Math.random() < 0.75 ? 'snv' : 'del';
+      const bases = ['A', 'C', 'G', 'T'];
+      const alt = kind === 'snv' ? bases[Math.floor(Math.random() * 4)] : null;
+      s.genetics.mutations.push({
+        id: `mut-${s.mission.currentSol}-${pos}`,
+        sol: s.mission.currentSol,
+        crop: targetCrop,
+        gene: 'GBSS',
+        kind, pos, alt,
+        scored: false,
+        delta_score: null,
+        interpretation: 'pending',
+        probabilities: null,
+      });
+      s.genetics.totalRadiationEvents++;
+      s.alerts.push({
+        type: 'dna_mutation', sol: s.mission.currentSol,
+        message: `Radiation-induced DNA mutation detected in ${CROP_DB[targetCrop].name} GBSS gene at pos ${pos}`,
+        severity: 'warning',
+      });
+    }
+    if (s.genetics.mutations.length > 50) s.genetics.mutations = s.genetics.mutations.slice(-50);
 
     // ── Run Proactive Agent ──
     runSafetyOverrides(s);
@@ -475,9 +528,11 @@ async function loadState() {
 }
 
 function resetState() {
-  try { localStorage.removeItem(STATE_KEY); } catch {}
-  fetch(STATE_API, { method: 'DELETE' }).catch(() => {});
-  return createInitialState();
+  const fresh = createInitialState();
+  try { localStorage.setItem(STATE_KEY, JSON.stringify(fresh)); } catch {}
+  // Overwrite server state with fresh state (not just DELETE — avoids race with polling)
+  fetch(STATE_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fresh) }).catch(() => {});
+  return fresh;
 }
 
 export { CROP_DB, MARS, CREW, createInitialState, advanceSol, plantCrop, applyActions, cropStressFactor, saveState, loadState, resetState };

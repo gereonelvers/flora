@@ -57,10 +57,20 @@ export function initUI() {
       </div>
     </div>
     <div class="hud-modules" id="hud-modules"></div>
+    <div class="hud-time" id="hud-time">
+      <span class="hud-time-label">TIME</span>
+      <span class="hud-time-value" id="hud-clock">06:00</span>
+      <span class="hud-speed" id="hud-speed">1x</span>
+    </div>
     <div class="hud-actions">
+      <button id="btn-speed-0" class="hud-btn hud-speed-btn">⏸</button>
+      <button id="btn-speed-1" class="hud-btn hud-speed-btn active">1×</button>
+      <button id="btn-speed-3" class="hud-btn hud-speed-btn">3×</button>
+      <button id="btn-speed-10" class="hud-btn hud-speed-btn">10×</button>
       <button id="btn-advance-1" class="hud-btn">+1 Sol</button>
-      <button id="btn-advance-10" class="hud-btn">+10 Sols</button>
-      <button id="btn-advance-30" class="hud-btn">+30 Sols</button>
+      <button id="btn-advance-10" class="hud-btn">+10</button>
+    </div>
+    <div class="hud-actions">
       <button id="btn-auto-plant" class="hud-btn hud-btn-accent">Ask FLORA to Plan</button>
     </div>
   `;
@@ -114,10 +124,41 @@ export function initUI() {
 
   document.getElementById('btn-advance-1').addEventListener('click', () => { state = advanceSol(state, 1); saveState(state); updateHUD(); });
   document.getElementById('btn-advance-10').addEventListener('click', () => { state = advanceSol(state, 10); saveState(state); updateHUD(); });
-  document.getElementById('btn-advance-30').addEventListener('click', () => { state = advanceSol(state, 30); saveState(state); updateHUD(); });
   document.getElementById('btn-auto-plant').addEventListener('click', () => {
     handleUserMessage('Analyze the current greenhouse state and recommend an optimal crop plan. Provide actions I can execute.');
   });
+
+  // Speed controls
+  const speedBtns = { 0: 'btn-speed-0', 1: 'btn-speed-1', 3: 'btn-speed-3', 10: 'btn-speed-10' };
+  const setSpeed = (s) => {
+    if (window.__flora3d) window.__flora3d.setSimSpeed(s);
+    Object.entries(speedBtns).forEach(([, id]) => document.getElementById(id)?.classList.remove('active'));
+    document.getElementById(speedBtns[s])?.classList.add('active');
+    const el = document.getElementById('hud-speed');
+    if (el) el.textContent = s === 0 ? 'PAUSED' : `${s}×`;
+  };
+  document.getElementById('btn-speed-0').addEventListener('click', () => setSpeed(0));
+  document.getElementById('btn-speed-1').addEventListener('click', () => setSpeed(1));
+  document.getElementById('btn-speed-3').addEventListener('click', () => setSpeed(3));
+  document.getElementById('btn-speed-10').addEventListener('click', () => setSpeed(10));
+
+  // Real-time sol advance callback (called by main.js animation loop when a full sol completes)
+  window.__floraUI = {
+    advanceSol: () => {
+      state = advanceSol(state, 1);
+      saveState(state);
+      updateHUD();
+    },
+  };
+
+  // Update time-of-day clock every 200ms
+  setInterval(() => {
+    const frac = window.__flora3d?.getSolFraction?.() ?? 0.35;
+    const hours = Math.floor(frac * 24.65);
+    const minutes = Math.floor((frac * 24.65 - hours) * 60);
+    const el = document.getElementById('hud-clock');
+    if (el) el.textContent = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  }, 200);
 
   // Chat toggle
   document.getElementById('chat-toggle').addEventListener('click', () => {
@@ -270,6 +311,11 @@ const UI_STYLES = `
 .mod-crops { display:flex;flex-wrap:wrap;gap:4px;margin-top:3px; }
 .mod-crop { font-family:'DM Mono',monospace;font-size:0.52rem;border:1px solid rgba(255,255,255,0.1);padding:1px 6px;color:rgba(255,255,255,0.6); }
 .mod-empty { font-family:'DM Mono',monospace;font-size:0.52rem;color:rgba(255,255,255,0.25); }
+.hud-time { display:flex;align-items:baseline;gap:8px;margin-bottom:8px;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06); }
+.hud-time-label { font-family:'DM Mono',monospace;font-size:0.52rem;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.35); }
+.hud-time-value { font-family:'DM Mono',monospace;font-size:1rem;font-weight:500;letter-spacing:0.06em; }
+.hud-speed { font-family:'DM Mono',monospace;font-size:0.62rem;color:rgba(255,255,255,0.4);margin-left:auto; }
+.hud-speed-btn.active { background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.95);border-color:rgba(255,255,255,0.25); }
 .hud-actions { display:flex;gap:4px;flex-wrap:wrap; }
 .hud-btn {
   flex:1;min-width:50px;padding:5px 6px;

@@ -351,6 +351,8 @@ function createLighting(scene) {
   const coolRim = new THREE.DirectionalLight(0xc8e8ff, 0.5);
   coolRim.position.set(-110, 26, 148);
   scene.add(coolRim);
+
+  return { hemisphere, sun, fill, coolRim };
 }
 
 function createMoonMesh(radius, color) {
@@ -1834,7 +1836,7 @@ export function createMarsBaseExperience(renderer) {
   const animated = [];
   const textures = createTextures(renderer);
 
-  createLighting(scene);
+  const lights = createLighting(scene);
   createAtmosphere(scene, textures, animated);
   const terrain = createTerrain(scene, textures);
   createStation(scene, textures, terrain.getHeightAt, animated);
@@ -1843,19 +1845,80 @@ export function createMarsBaseExperience(renderer) {
   const resetPosition = new THREE.Vector3(82, 30, 76);
   const resetTarget = new THREE.Vector3(6, 11.5, -4);
 
+  // Day/night color palettes
+  const DAY_BG    = new THREE.Color(0xc4836a);
+  const DUSK_BG   = new THREE.Color(0x8a3a2e);
+  const NIGHT_BG  = new THREE.Color(0x1a0e0a);
+  const DAWN_BG   = new THREE.Color(0x9e5040);
+  const DAY_FOG   = new THREE.Color(0xc4836a);
+  const NIGHT_FOG = new THREE.Color(0x1a0e0a);
+  const tmpColor  = new THREE.Color();
+  const tmpDir    = new THREE.Vector3();
+
   return {
     resize(width, height) {
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       composer.setSize(width, height);
       composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      // post-processing resize handled by composer
     },
     resetCamera() {
       camera.position.copy(resetPosition);
       controls.target.copy(resetTarget);
       controls.autoRotate = true;
       controls.update();
+    },
+    /**
+     * Set the time of day for the day/night cycle.
+     * @param {number} t — fraction of sol (0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk)
+     */
+    setTimeOfDay(t) {
+      // Sun angle: rotate around Y axis, with elevation based on time
+      const sunAngle = t * Math.PI * 2 - Math.PI * 0.5; // noon at t=0.5, midnight at t=0
+      const elevation = Math.sin(sunAngle);
+      const horizontal = Math.cos(sunAngle);
+      tmpDir.set(horizontal * 0.76, Math.max(0.02, elevation), horizontal * -0.22).normalize();
+      lights.sun.position.copy(tmpDir).multiplyScalar(260);
+
+      // Sun intensity: peaks at noon, zero below horizon
+      const sunUp = Math.max(0, elevation);
+      lights.sun.intensity = sunUp * 5.5;
+      lights.fill.intensity = sunUp * 0.8;
+      lights.coolRim.intensity = 0.2 + sunUp * 0.3;
+
+      // Hemisphere: warm sky during day, dark at night
+      const nightMix = 1 - sunUp;
+      lights.hemisphere.intensity = 0.4 + sunUp * 1.4;
+      tmpColor.setHex(0xffeedd).lerp(new THREE.Color(0x221108), nightMix);
+      lights.hemisphere.color.copy(tmpColor);
+      tmpColor.setHex(0x8b5a3a).lerp(new THREE.Color(0x0a0504), nightMix);
+      lights.hemisphere.groundColor.copy(tmpColor);
+
+      // Background & fog color: blend between day/dusk/night/dawn
+      let bgColor;
+      if (t < 0.2) {
+        // night → dawn
+        bgColor = NIGHT_BG.clone().lerp(DAWN_BG, t / 0.2);
+      } else if (t < 0.35) {
+        // dawn → day
+        bgColor = DAWN_BG.clone().lerp(DAY_BG, (t - 0.2) / 0.15);
+      } else if (t < 0.65) {
+        // day
+        bgColor = DAY_BG.clone();
+      } else if (t < 0.8) {
+        // day → dusk
+        bgColor = DAY_BG.clone().lerp(DUSK_BG, (t - 0.65) / 0.15);
+      } else {
+        // dusk → night
+        bgColor = DUSK_BG.clone().lerp(NIGHT_BG, (t - 0.8) / 0.2);
+      }
+      scene.background.copy(bgColor);
+      scene.fog.color.copy(bgColor);
+      scene.fog.near = 120 - nightMix * 40; // tighter fog at night
+      scene.fog.far = 340 - nightMix * 100;
+
+      // Tone mapping exposure: dimmer at night
+      renderer.toneMappingExposure = 0.6 + sunUp * 1.0;
     },
     update(elapsed) {
       for (const animation of animated) {
