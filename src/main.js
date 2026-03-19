@@ -39,7 +39,6 @@ const REAL_SOL_SEC = 88775;
 let solFraction = 0;
 let simSpeed = 1500;
 let simStarted = false;
-let lastTime = performance.now() / 1000;
 let suppressPoll = false; // prevent polls from overwriting after reset/start
 
 // Read state from server (via ui.js) — called on init and periodically
@@ -190,30 +189,34 @@ document.getElementById('start-3d-btn').onclick = () => {
 // ── Poll server state every 500ms ────────────────────────────────────
 setInterval(readFromServer, 500);
 
-// ── Animation loop ───────────────────────────────────────────────────
-renderer.setAnimationLoop(() => {
-  const elapsed = clock.getElapsedTime();
-  const now = performance.now() / 1000;
-  const dt = Math.min(now - lastTime, 0.1);
-  lastTime = now;
+// ── Simulation tick (setInterval — keeps running in background tabs) ──
+let simLastTime = performance.now() / 1000;
 
-  // Advance time
+setInterval(() => {
+  const now = performance.now() / 1000;
+  const dt = Math.min(now - simLastTime, 2); // cap to avoid huge jumps after long sleep
+  simLastTime = now;
+
   if (simStarted && simSpeed > 0) {
     solFraction += (dt / REAL_SOL_SEC) * simSpeed;
-    if (solFraction >= 1) {
+    while (solFraction >= 1) {
       solFraction -= 1;
       if (window.__floraUI?.advanceSol) {
         window.__floraUI.advanceSol();
       }
     }
   }
+}, 100);
 
-  // Write to server every ~2s (always while started, even if paused)
-  if (simStarted && Math.floor(now * 0.5) !== Math.floor((now - dt) * 0.5)) {
-    writeToServer();
-  }
+// ── Server sync (separate interval, not tied to rendering) ───────────
+setInterval(() => {
+  if (simStarted) writeToServer();
+}, 2000);
 
-  // Render
+// ── Render loop (only visuals — pauses when tab hidden, that's fine) ─
+renderer.setAnimationLoop(() => {
+  const elapsed = clock.getElapsedTime();
+
   experience.setTimeOfDay(simStarted ? solFraction : 0.4);
   const currentSol = window.__floraUI?.getCurrentSol?.() ?? 1;
   if (simStarted) {
