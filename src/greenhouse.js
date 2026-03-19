@@ -142,8 +142,8 @@ function createInitialState() {
     },
     modules: [
       { id: 1, name: 'Module Alpha', area_m2: 30, crops: [], temp: 19, humidity: 60, co2: 800, light: 250, temp_target: 19, hvac_status: 1.0, onlineSol: 2 },
-      { id: 2, name: 'Module Beta', area_m2: 30, crops: [], temp: 19, humidity: 60, co2: 800, light: 250, temp_target: 19, hvac_status: 1.0, onlineSol: 2 },
-      { id: 3, name: 'Module Gamma', area_m2: 30, crops: [], temp: 19, humidity: 60, co2: 800, light: 250, temp_target: 19, hvac_status: 1.0, onlineSol: 2 },
+      { id: 2, name: 'Module Beta', area_m2: 30, crops: [], temp: 19, humidity: 60, co2: 800, light: 250, temp_target: 19, hvac_status: 1.0, onlineSol: 3 },
+      { id: 3, name: 'Module Gamma', area_m2: 30, crops: [], temp: 19, humidity: 60, co2: 800, light: 250, temp_target: 19, hvac_status: 1.0, onlineSol: 4 },
     ],
     resources: {
       water_liters: 5000,
