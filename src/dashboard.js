@@ -764,8 +764,8 @@ html,body,#dashboard {
   padding:24px 28px;
   border-bottom:1px solid var(--border);
   overflow-y:auto;
-  flex-shrink:0;
-  max-height:50vh;
+  flex:1;
+  min-height:0;
 }
 .detail-header {
   display:flex;justify-content:space-between;align-items:baseline;
@@ -797,14 +797,14 @@ html,body,#dashboard {
 .detail-crop-meta { font-family:var(--mono);font-size:0.55rem;color:var(--text3);margin-top:4px; }
 .detail-empty { font-family:var(--mono);font-size:0.65rem;color:var(--text3);padding:20px 0;text-align:center; }
 .detail-section-title { font-family:var(--mono);font-size:0.58rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text2);margin-bottom:8px; }
-.detail-ascii { font-family:var(--mono);font-size:0.62rem;line-height:1.3;white-space:pre;color:var(--text2);margin-bottom:8px; }
-.detail-ascii-legend { display:flex;gap:12px;font-family:var(--mono);font-size:0.5rem;color:var(--text3);margin-top:4px; }
+.detail-ascii { font-family:var(--mono);font-size:0.82rem;line-height:1.35;white-space:pre;color:var(--text2);margin-bottom:10px; }
+.detail-ascii-legend { display:flex;gap:14px;font-family:var(--mono);font-size:0.58rem;color:var(--text3);margin-top:6px; }
 .detail-two-col { display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:4px; }
 .detail-env-list { display:flex;flex-direction:column; }
 .detail-env-row { display:flex;justify-content:space-between;font-family:var(--mono);font-size:0.68rem;padding:5px 0;border-bottom:1px solid var(--border-light); }
 .detail-crop-grid { display:flex;gap:1px;background:var(--border);border:1px solid var(--border);flex-wrap:wrap; }
 .detail-crop-card { background:var(--surface);padding:12px 14px;text-align:center;min-width:80px;flex:1; }
-.detail-crop-ascii { font-family:var(--mono);font-size:0.55rem;line-height:1.15;color:var(--text2);margin-bottom:4px; }
+.detail-crop-ascii { font-family:var(--mono);font-size:0.75rem;line-height:1.2;color:var(--text2);margin-bottom:6px; }
 .detail-crop-card-name { font-size:0.72rem;font-weight:500; }
 .detail-crop-card-meta { font-family:var(--mono);font-size:0.52rem;color:var(--text3);margin-top:2px; }
 
@@ -884,17 +884,17 @@ html,body,#dashboard {
 @keyframes inner-orbit{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
 
 .flora-avatar-section {
-  padding:32px 24px 20px;
+  padding:16px 24px 12px;
   display:flex;flex-direction:column;align-items:center;
   border-bottom:1px solid var(--border-light);
   flex-shrink:0;
 }
 .flora-orb-wrap {
-  position:relative;width:160px;height:160px;
+  position:relative;width:110px;height:110px;
   display:flex;align-items:center;justify-content:center;
 }
 .flora-orb-container {
-  position:relative;width:120px;height:120px;
+  position:relative;width:85px;height:85px;
   display:flex;align-items:center;justify-content:center;
 }
 .flora-blob {
@@ -911,7 +911,7 @@ html,body,#dashboard {
   transition:background 0.8s ease;
 }
 .flora-lotus {
-  width:60px;height:60px;
+  width:46px;height:46px;
   color:rgba(0,0,0,0.35);
 }
 .flora-svg { width:100%;height:100%;overflow:visible; }
