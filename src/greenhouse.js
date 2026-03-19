@@ -200,12 +200,28 @@ function applyActions(state, actions) {
 }
 
 const STATE_KEY = 'flora-greenhouse-state';
+const STATE_API = 'https://lwx98cb4sg.execute-api.us-east-1.amazonaws.com/state';
 
 function saveState(state) {
-  try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch {}
+  const json = JSON.stringify(state);
+  try { localStorage.setItem(STATE_KEY, json); } catch {}
+  // Async save to server (fire and forget)
+  fetch(STATE_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json }).catch(() => {});
 }
 
-function loadState() {
+async function loadState() {
+  // Try server first (cross-device), fall back to localStorage
+  try {
+    const res = await fetch(STATE_API);
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.mission) {
+        localStorage.setItem(STATE_KEY, JSON.stringify(data));
+        return data;
+      }
+    }
+  } catch {}
+  // Fallback to localStorage
   try {
     const saved = localStorage.getItem(STATE_KEY);
     if (saved) return JSON.parse(saved);
@@ -215,6 +231,7 @@ function loadState() {
 
 function resetState() {
   try { localStorage.removeItem(STATE_KEY); } catch {}
+  fetch(STATE_API, { method: 'DELETE' }).catch(() => {});
   return createInitialState();
 }
 

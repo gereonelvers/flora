@@ -6,7 +6,7 @@
 import { sendToAgent, parseActions } from './agent-client.js';
 import { createInitialState, advanceSol, applyActions, saveState, loadState, resetState, CROP_DB } from './greenhouse.js';
 
-let state = loadState() || createInitialState();
+let state = createInitialState(); // overwritten by async init in initUI
 let chatHistory = [];
 
 // ── Markdown-lite renderer ──────────────────────────────────────────
@@ -127,21 +127,20 @@ export function initUI() {
     icon.textContent = body.classList.contains('collapsed') ? '▲' : '▼';
   });
 
-  // Sync state across tabs
-  window.addEventListener('storage', (e) => {
-    if (e.key === 'flora-greenhouse-state' && e.newValue) {
-      try { state = JSON.parse(e.newValue); updateHUD(); } catch {}
-    }
-  });
+  // Load state from server
+  (async () => {
+    const saved = await loadState();
+    if (saved) { state = saved; updateHUD(); }
+  })();
 
-  // Poll for changes from other views
-  setInterval(() => {
-    const saved = loadState();
+  // Poll server for changes every 3s (cross-device sync)
+  setInterval(async () => {
+    const saved = await loadState();
     if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
       state = saved;
       updateHUD();
     }
-  }, 2000);
+  }, 3000);
 
   updateHUD();
   return { getState: () => state, setState: (s) => { state = s; saveState(s); updateHUD(); } };

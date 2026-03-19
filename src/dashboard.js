@@ -1,7 +1,7 @@
 import { sendToAgent, parseActions } from './agent-client.js';
 import { createInitialState, advanceSol, applyActions, plantCrop, saveState, loadState, resetState, CROP_DB } from './greenhouse.js';
 
-let state = loadState() || createInitialState();
+let state = createInitialState(); // overwritten by async init below
 let chatHistory = [];
 let isListening = false;
 let floraState = 'idle'; // idle | listening | thinking | speaking | alert
@@ -1028,20 +1028,18 @@ const style = document.createElement('style');
 style.textContent = STYLES;
 document.head.appendChild(style);
 
-// Sync state across tabs
-window.addEventListener('storage', (e) => {
-  if (e.key === 'flora-greenhouse-state' && e.newValue) {
-    try { state = JSON.parse(e.newValue); render(); } catch {}
-  }
-});
+// Load state from server, then render
+(async () => {
+  const saved = await loadState();
+  if (saved) state = saved;
+  render();
+})();
 
-// Poll for changes from other views (storage event doesn't fire in same tab)
-setInterval(() => {
-  const saved = loadState();
+// Poll server for changes every 3s (cross-device sync)
+setInterval(async () => {
+  const saved = await loadState();
   if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
     state = saved;
     render();
   }
-}, 2000);
-
-render();
+}, 3000);
