@@ -384,18 +384,33 @@ function renderDetailPanel() {
           <div class="detail-item">
             <div class="detail-label">Water</div>
             <div class="detail-value ${waterPct > 40 ? '' : waterPct > 20 ? 'warn' : 'crit'}">${Math.round(state.resources.water_liters)}L</div>
-            <div class="detail-sub">${state.resources.water_daily_budget}L/sol budget</div>
+            <div class="detail-sub">Recycling: ${Math.round((state.resources.water_recycling_efficiency || 0.92) * 100)}%</div>
+            <div class="detail-sub">Crew need: ${state.crew?.daily_water_need || 22}L/sol</div>
             ${bar(state.resources.water_liters, 5000, '#1a1a1a')}
           </div>
           <div class="detail-item">
-            <div class="detail-label">Energy</div>
-            <div class="detail-value">${state.resources.energy_kwh} kWh</div>
-            <div class="detail-sub">CO₂: ${state.resources.co2_kg} kg</div>
+            <div class="detail-label">Energy Balance</div>
+            <div class="detail-value ${(state.energy?.balance || 0) >= 0 ? '' : 'crit'}">${(state.energy?.balance || 0) >= 0 ? '+' : ''}${state.energy?.balance || 0} kWh</div>
+            <div class="detail-sub">Solar: ${state.energy?.solar_production || 0} kWh</div>
+            <div class="detail-sub">LEDs: -${state.energy?.led_consumption || 0} kWh</div>
+            <div class="detail-sub">HVAC: -${state.energy?.hvac_consumption || 0} kWh</div>
+            <div class="detail-sub">Systems: -${(state.energy?.systems_consumption || 0) + (state.energy?.crew_consumption || 0)} kWh</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Battery</div>
+            <div class="detail-value">${Math.round(state.resources.energy_stored_kwh || 0)} kWh</div>
+            ${bar(state.resources.energy_stored_kwh || 0, 1000, '#1a1a1a')}
           </div>
           <div class="detail-item">
             <div class="detail-label">Crew</div>
             <div class="detail-value">${state.mission.crew}</div>
-            <div class="detail-sub">${state.mission.name}</div>
+            <div class="detail-sub">Morale: ${state.mission.morale || 80}%</div>
+            <div class="detail-sub">Rations: ${Math.round(state.nutrition.food_reserves_days || 0)}d</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Active Events</div>
+            <div class="detail-value">${(state.events || []).length}</div>
+            ${(state.events || []).map(e => `<div class="detail-sub">${e.name}</div>`).join('')}
           </div>
         </div>
         ${allCrops.length > 0 ? `
@@ -446,6 +461,28 @@ function renderDetailPanel() {
                 <span class="detail-row-value">${h.yield_kg} kg</span>
                 <span class="detail-row-sub">Module ${h.module}</span>
               </div>
+            `).join('')}
+        </div>
+      </div>`;
+  }
+
+  if (activeTab === 'agent-log') {
+    const actions = state.agentActions || [];
+    return `
+      <div class="detail-panel">
+        <div class="detail-header">
+          <span class="detail-title">FLORA Agent Log</span>
+          <button class="detail-close" id="detail-close">&times;</button>
+        </div>
+        <div class="detail-sub" style="margin-bottom:12px">Proactive actions taken by FLORA to optimize greenhouse operations</div>
+        <div class="detail-list">
+          ${actions.length === 0 ? '<div class="detail-empty">No autonomous actions recorded yet. Advance sols to see FLORA respond to conditions.</div>' :
+            actions.slice().reverse().map(a => `
+              <div class="detail-row">
+                <span class="detail-row-label">Sol ${a.sol}</span>
+                <span>${a.action}</span>
+              </div>
+              <div style="padding:0 0 6px;font-size:0.58rem;color:var(--text3);font-family:var(--mono)">${a.reason}</div>
             `).join('')}
         </div>
       </div>`;
@@ -551,10 +588,6 @@ function render() {
 
         <div class="d-sidebar-tab ${activeTab === 'metrics' ? 'active' : ''}" data-tab="metrics">
           <div class="d-metric">
-            <div class="d-metric-head"><span class="d-metric-label">Mission</span><span class="d-metric-value">${missionPct}%</span></div>
-            ${bar(state.mission.currentSol, state.mission.totalSols, '#1a1a1a')}
-          </div>
-          <div class="d-metric">
             <div class="d-metric-head"><span class="d-metric-label">Nutrition</span><span class="d-metric-value ${state.nutrition.coverage_percent >= 80 ? '' : state.nutrition.coverage_percent >= 50 ? 'warn' : 'crit'}">${state.nutrition.coverage_percent}%</span></div>
             ${bar(state.nutrition.coverage_percent, 100, state.nutrition.coverage_percent >= 80 ? '#1a1a1a' : state.nutrition.coverage_percent >= 50 ? '#92400e' : '#991b1b')}
           </div>
@@ -562,29 +595,40 @@ function render() {
             <div class="d-metric-head"><span class="d-metric-label">Water</span><span class="d-metric-value ${waterPct > 40 ? '' : waterPct > 20 ? 'warn' : 'crit'}">${Math.round(state.resources.water_liters)}L</span></div>
           </div>
           <div class="d-metric">
-            <div class="d-metric-head"><span class="d-metric-label">Area</span><span class="d-metric-value">${usedArea}/${totalArea}m²</span></div>
+            <div class="d-metric-head"><span class="d-metric-label">Energy</span><span class="d-metric-value ${(state.energy?.balance || 0) >= 0 ? '' : 'crit'}">${state.energy?.balance >= 0 ? '+' : ''}${state.energy?.balance || 0} kWh</span></div>
+          </div>
+          <div class="d-metric">
+            <div class="d-metric-head"><span class="d-metric-label">Morale</span><span class="d-metric-value ${(state.mission.morale || 80) >= 70 ? '' : 'warn'}">${state.mission.morale || 80}</span></div>
           </div>
         </div>
 
         ${state.modules.map((m, i) => {
           const used = m.crops.reduce((s, c) => s + c.area_m2, 0);
+          const avgHealth = m.crops.length > 0 ? Math.round(m.crops.reduce((s, c) => s + (c.health || 100), 0) / m.crops.length) : 0;
+          const hasEvent = (state.events || []).some(e => e.module === m.id);
           return `
-          <div class="d-sidebar-tab ${activeTab === 'module-' + i ? 'active' : ''}" data-tab="module-${i}">
+          <div class="d-sidebar-tab ${activeTab === 'module-' + i ? 'active' : ''} ${hasEvent ? 'd-sidebar-event' : ''}" data-tab="module-${i}">
             <div class="d-module-header">
-              <span class="d-module-name">${m.name}</span>
+              <span class="d-module-name">${hasEvent ? '! ' : ''}${m.name}</span>
               <span class="d-module-area">${used}/${m.area_m2}m²</span>
             </div>
-            <div class="d-module-env">${m.temp}°C &middot; ${m.crops.length} crop${m.crops.length !== 1 ? 's' : ''}</div>
+            <div class="d-module-env">${m.temp}°C &middot; ${m.crops.length} crop${m.crops.length !== 1 ? 's' : ''}${m.crops.length > 0 ? ` &middot; ${avgHealth}% health` : ''}</div>
           </div>`;
         }).join('')}
+
+        ${(state.events || []).length > 0 ? `<div class="d-sidebar-tab d-sidebar-alert">
+          <div class="d-module-name">Active Events</div>
+          ${state.events.map(e => `<div class="d-alert">${e.name} (${e.sol_end - state.mission.currentSol}d left)</div>`).join('')}
+        </div>` : ''}
+
+        ${(state.agentActions || []).length > 0 ? `<div class="d-sidebar-tab ${activeTab === 'agent-log' ? 'active' : ''}" data-tab="agent-log">
+          <div class="d-module-name">FLORA Actions</div>
+          <div class="d-module-env">${state.agentActions.length} recent</div>
+        </div>` : ''}
 
         ${state.harvests.length > 0 ? `<div class="d-sidebar-tab ${activeTab === 'harvests' ? 'active' : ''}" data-tab="harvests">
           <div class="d-module-name">Harvests</div>
           <div class="d-module-env">${state.harvests.length} recorded</div>
-        </div>` : ''}
-
-        ${state.alerts.length > 0 ? `<div class="d-sidebar-tab d-sidebar-alert" data-tab="alerts">
-          ${state.alerts.map(a => `<div class="d-alert">Sol ${a.sol} — ${a.message}</div>`).join('')}
         </div>` : ''}
 
         <div class="d-sidebar-footer">
@@ -768,8 +812,8 @@ html,body,#dashboard {
 }
 .d-sidebar-tab:hover { background:var(--border-light); }
 .d-sidebar-tab.active { background:var(--bg);border-left:2px solid var(--text); }
-.d-sidebar-alert { border-color:var(--crit);cursor:default; }
-.d-sidebar-alert:hover { background:transparent; }
+.d-sidebar-alert { border-color:var(--crit); }
+.d-sidebar-event { border-left:2px solid var(--warn); }
 
 /* ── Detail Panel ── */
 .detail-panel {
