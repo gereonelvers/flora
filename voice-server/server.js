@@ -86,7 +86,7 @@ Your responsibilities: crop selection and scheduling, environmental monitoring, 
 
 Keep responses concise and spoken-friendly — 2-3 sentences typically. You are speaking to astronauts on tablets. Be warm but professional. No markdown, no bullet points, no tables — you are speaking.
 
-You have a query_knowledge_base tool for specific lookups, but most information you need is already in your reference data below. Prefer using this reference data directly over making tool calls.
+You have a query_knowledge_base tool for specific lookups. You also have reference data below for quick answers. Use whichever is most appropriate.
 
 REFERENCE DATA:
 ${knowledgeCache}`;
@@ -267,16 +267,55 @@ async function handleConnection(ws) {
           console.log(`[voice] Tool result: ${toolResult.length} chars, sending back`);
 
           const toolContentName = randomUUID();
-          enqueueInput({
+
+          // Build exact events matching AWS Python sample
+          const toolStartEvent = {
             contentStart: {
-              promptName, contentName: toolContentName, interactive: false, type: 'TOOL', role: 'TOOL',
-              toolResultInputConfiguration: { toolUseId, type: 'TEXT', textInputConfiguration: { mediaType: 'text/plain' } },
+              promptName,
+              contentName: toolContentName,
+              interactive: false,
+              type: 'TOOL',
+              role: 'TOOL',
+              toolResultInputConfiguration: {
+                toolUseId,
+                type: 'TEXT',
+                textInputConfiguration: { mediaType: 'text/plain' },
+              },
             },
-          });
-          // Nova Sonic expects tool result content to be valid JSON
-          const jsonResult = JSON.stringify({ result: toolResult });
-          enqueueInput({ toolResult: { promptName, contentName: toolContentName, content: jsonResult } });
-          enqueueInput({ contentEnd: { promptName, contentName: toolContentName } });
+          };
+
+          // Strip markdown formatting (not useful for speech) and wrap as JSON — Nova Sonic needs valid JSON, not raw markdown
+          const cleanResult = toolResult
+            .replace(/#{1,6}\s/g, '')      // markdown headers
+            .replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1') // bold/italic (keep inner text)
+            .replace(/---+/g, '')          // horizontal rules
+            .replace(/\|/g, ', ')          // table pipes
+            .replace(/\n{3,}/g, '\n\n')    // collapse newlines
+            .trim();
+          const toolResultContent = JSON.stringify({ answer: cleanResult });
+          const toolResultEvent = {
+            toolResult: {
+              promptName,
+              contentName: toolContentName,
+              content: toolResultContent,
+            },
+          };
+
+          const toolEndEvent = {
+            contentEnd: {
+              promptName,
+              contentName: toolContentName,
+            },
+          };
+
+          console.log(`[voice] Sending tool result events:`);
+          console.log(`[voice]   contentStart: ${JSON.stringify(toolStartEvent).substring(0, 200)}`);
+          console.log(`[voice]   toolResult content (${toolResultContent.length} chars): ${toolResultContent.substring(0, 150)}...`);
+          console.log(`[voice]   contentEnd: ${JSON.stringify(toolEndEvent)}`);
+
+          enqueueInput(toolStartEvent);
+          enqueueInput(toolResultEvent);
+          enqueueInput(toolEndEvent);
         }
 
         // Turn complete
