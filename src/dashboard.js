@@ -1038,7 +1038,7 @@ window.addEventListener('storage', (e) => {
 // Poll for changes from other views (storage event doesn't fire in same tab)
 setInterval(() => {
   const saved = loadState();
-  if (saved && saved.mission.currentSol !== state.mission.currentSol) {
+  if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
     state = saved;
     render();
   }

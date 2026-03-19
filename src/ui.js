@@ -137,7 +137,7 @@ export function initUI() {
   // Poll for changes from other views
   setInterval(() => {
     const saved = loadState();
-    if (saved && saved.mission.currentSol !== state.mission.currentSol) {
+    if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
       state = saved;
       updateHUD();
     }
