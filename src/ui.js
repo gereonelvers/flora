@@ -134,6 +134,15 @@ export function initUI() {
     }
   });
 
+  // Poll for changes from other views
+  setInterval(() => {
+    const saved = loadState();
+    if (saved && saved.mission.currentSol !== state.mission.currentSol) {
+      state = saved;
+      updateHUD();
+    }
+  }, 2000);
+
   updateHUD();
   return { getState: () => state, setState: (s) => { state = s; saveState(s); updateHUD(); } };
 }

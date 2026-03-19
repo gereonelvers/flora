@@ -630,8 +630,12 @@ function render() {
   // Logo → back to orb view
   document.getElementById('logo-home').onclick = () => { activeTab = null; render(); };
 
-  // Reset simulation
-  document.getElementById('btn-reset').onclick = () => { state = resetState(); activeTab = null; chatHistory = []; render(); };
+  // Reset simulation (with confirmation)
+  document.getElementById('btn-reset').onclick = () => {
+    if (confirm('Reset simulation to Sol 1? All crops, harvests, and progress will be lost.')) {
+      state = resetState(); activeTab = null; chatHistory = []; render();
+    }
+  };
 
   // Tab click handlers
   document.querySelectorAll('.d-sidebar-tab').forEach(tab => {
@@ -1030,5 +1034,14 @@ window.addEventListener('storage', (e) => {
     try { state = JSON.parse(e.newValue); render(); } catch {}
   }
 });
+
+// Poll for changes from other views (storage event doesn't fire in same tab)
+setInterval(() => {
+  const saved = loadState();
+  if (saved && saved.mission.currentSol !== state.mission.currentSol) {
+    state = saved;
+    render();
+  }
+}, 2000);
 
 render();
