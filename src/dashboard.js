@@ -467,7 +467,7 @@ function render() {
       <!-- Narrow data sidebar -->
       <aside class="d-sidebar">
         <div class="d-sidebar-header">
-          <span class="d-logo-text">FLORA</span>
+          <span class="d-logo-text" id="logo-home" style="cursor:pointer">FLORA</span>
           <span class="d-sol">SOL ${state.mission.currentSol}<span class="d-sol-total">/${state.mission.totalSols}</span></span>
         </div>
 
@@ -545,6 +545,9 @@ function render() {
   document.getElementById('d-input').onkeydown = (e) => {
     if (e.key === 'Enter') { const v = e.target.value.trim(); if (v) { e.target.value = ''; handleSend(v); } }
   };
+
+  // Logo → back to orb view
+  document.getElementById('logo-home').onclick = () => { activeTab = null; render(); };
 
   // Tab click handlers
   document.querySelectorAll('.d-sidebar-tab').forEach(tab => {
