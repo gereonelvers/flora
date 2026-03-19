@@ -159,7 +159,7 @@ function createInitialState() {
       current_daily_kcal: 0,
       current_daily_protein_g: 0,
       coverage_percent: 0,
-      food_reserves_days: 60,
+      food_reserves_days: 120,
       food_stored_kcal: 0,            // harvested food in storage (kcal)
       food_stored_protein: 0,         // harvested food in storage (g protein)
     },
