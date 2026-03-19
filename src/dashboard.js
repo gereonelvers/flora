@@ -172,29 +172,41 @@ function appendSystemMsg(text) {
   }
 }
 
+let statusMessages = []; // autonomous actions & system status — shown in journal
+
 function appendChatMsg(text, role) {
-  // Filter out stale "analyzing" system messages when real content arrives
-  if (role === 'agent') {
-    chatMessages = chatMessages.filter(m =>
-      !(m.role === 'system' && (m.text.includes('analyzing') || m.text.includes('running in background')))
-    );
-  }
   chatMessages.push({ text, role });
   if (chatMessages.length > 50) chatMessages = chatMessages.slice(-50);
-  // Update DOM if it exists
   const msgs = document.getElementById('d-messages');
   if (!msgs) return;
-  // Re-render all messages to reflect filtered list
-  msgs.querySelector('.d-chat-messages').innerHTML = renderChatMessagesInner();
+  const el = msgs.querySelector('.d-chat-messages');
+  if (el) el.innerHTML = renderChatMessagesInner();
   const isNearBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
   if (isNearBottom) msgs.scrollTop = msgs.scrollHeight;
 }
 
+function appendStatusMsg(text) {
+  statusMessages.push(text);
+  if (statusMessages.length > 30) statusMessages = statusMessages.slice(-30);
+  const el = document.getElementById('d-status-list');
+  if (el) {
+    el.innerHTML = renderStatusMessagesInner();
+    // Auto-open journal when new status arrives
+    el.classList.add('open');
+  }
+}
+
 function renderChatMessagesInner() {
-  return chatMessages.map(m => {
-    const cls = m.role === 'user' ? 'd-msg-user' : m.role === 'system' ? 'd-msg-system' : 'd-msg-agent';
+  return chatMessages.filter(m => m.role === 'user' || m.role === 'agent').map(m => {
+    const cls = m.role === 'user' ? 'd-msg-user' : 'd-msg-agent';
     return `<div class="d-msg ${cls}"><div class="d-msg-text">${md(m.text)}</div></div>`;
   }).join('');
+}
+
+function renderStatusMessagesInner() {
+  return statusMessages.slice().reverse().map(t =>
+    `<div class="d-msg d-msg-status"><div class="d-msg-text">${md(t)}</div></div>`
+  ).join('');
 }
 
 function renderChatMessages() {
@@ -906,7 +918,7 @@ async function runFloraAutonomous() {
         if (a.type === 'adjust_temperature') return `Set ${a.module} to ${a.value}°C`;
         return `${a.type} on ${a.module}`;
       }).join(', ');
-      appendChatMsg(`**Sol ${state.mission.currentSol}:** ${brief}`, 'agent');
+      appendStatusMsg(`**Sol ${state.mission.currentSol}:** ${brief}`);
     }
 
     setFloraState('idle');
@@ -931,7 +943,7 @@ function checkFloraLog() {
           if (a.type === 'adjust_temperature') return `Set Module ${a.module} temp to ${a.value}°C`;
           return `${a.type} on Module ${a.module}`;
         }).join(', ');
-        appendChatMsg(`**Sol ${entry.sol}:** ${summary}`, 'agent');
+        appendStatusMsg(`**Sol ${entry.sol}:** ${summary}`);
       }
     }
   }
@@ -1186,13 +1198,15 @@ function render() {
       </div>
       ${floraRunning ? '<div class="flora-status-bar"><span class="flora-status-dot"></span> Analyzing greenhouse state via knowledge base...</div>' : ''}
       <div class="d-messages" id="d-messages">
-        ${(state.floraJournal || []).length > 0 ? `
         <div class="d-journal-section">
           <div class="d-journal-toggle" id="d-journal-toggle">
-            <span>Journal</span>
-            <span class="d-journal-count">${(state.floraJournal || []).length} entries</span>
+            <span>Activity Log</span>
+            <span class="d-journal-count">${(state.floraJournal || []).length + statusMessages.length}</span>
           </div>
-          <div class="d-journal-list" id="d-journal-list">
+          <div class="d-journal-list" id="d-status-list">
+            ${statusMessages.slice().reverse().map(t =>
+              `<div class="d-msg d-msg-status"><div class="d-msg-text">${md(t)}</div></div>`
+            ).join('')}
             ${(state.floraJournal || []).slice().reverse().map(j => `
               <div class="d-msg d-msg-journal">
                 <div class="d-msg-text">
@@ -1202,8 +1216,7 @@ function render() {
               </div>
             `).join('')}
           </div>
-        </div>` : ''}
-        <div class="d-msg d-msg-agent"><div class="d-msg-text">FLORA online. Autonomous greenhouse management active.</div></div>
+        </div>
         ${renderChatMessages()}
       </div>
       <div class="d-input-area">
@@ -1367,7 +1380,7 @@ async function handleSend(text) {
     }
   } catch (err) {
     document.getElementById('d-loading')?.remove();
-    appendChatMsg(`Error: ${err.message}`, 'system');
+    appendStatusMsg(`Error: ${err.message}`);
     chatHistory.pop();
     setFloraState('alert');
   }
@@ -1909,6 +1922,10 @@ html,body,#dashboard {
 .d-msg-journal .d-msg-text {
   background:transparent;border:1px solid var(--border-light);border-left:2px solid var(--text2);
   padding:8px 14px;font-size:0.72rem;line-height:1.5;
+}
+.d-msg-status .d-msg-text {
+  background:transparent;border:1px solid var(--border-light);border-left:2px solid var(--accent,#4ade80);
+  padding:6px 14px;font-size:0.7rem;line-height:1.4;
 }
 .journal-header {
   font-family:var(--mono);font-size:0.52rem;font-weight:500;
