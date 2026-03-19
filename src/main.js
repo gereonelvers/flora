@@ -217,7 +217,8 @@ setInterval(() => {
 renderer.setAnimationLoop(() => {
   const elapsed = clock.getElapsedTime();
 
-  experience.setTimeOfDay(simStarted ? solFraction : 0.4);
+  const currentSolForLight = window.__floraUI?.getCurrentSol?.() ?? 1;
+  experience.setTimeOfDay(simStarted ? (currentSolForLight <= 1 ? 0.4 : solFraction) : 0.4);
   const currentSol = window.__floraUI?.getCurrentSol?.() ?? 1;
   if (simStarted) {
     experience.setMissionProgress(currentSol, solFraction);

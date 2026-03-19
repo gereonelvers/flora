@@ -286,11 +286,11 @@ function renderAvatar() {
   const s = FLORA_STATES[floraState];
   // Light-theme orb colors per state
   const orbColors = {
-    idle:      ['rgba(34,197,94,0.18)','rgba(16,185,129,0.14)','rgba(74,222,128,0.22)'],
-    listening: ['rgba(59,130,246,0.22)','rgba(34,211,238,0.18)','rgba(96,165,250,0.25)'],
-    thinking:  ['rgba(120,113,108,0.18)','rgba(168,162,158,0.14)','rgba(87,83,78,0.20)'],
-    speaking:  ['rgba(34,197,94,0.25)','rgba(22,163,74,0.20)','rgba(74,222,128,0.30)'],
-    alert:     ['rgba(239,68,68,0.22)','rgba(249,115,22,0.18)','rgba(220,38,38,0.25)'],
+    idle:      ['rgba(34,197,94,0.45)','rgba(16,185,129,0.35)','rgba(74,222,128,0.50)'],
+    listening: ['rgba(59,130,246,0.50)','rgba(34,211,238,0.40)','rgba(96,165,250,0.55)'],
+    thinking:  ['rgba(120,113,108,0.45)','rgba(168,162,158,0.35)','rgba(87,83,78,0.50)'],
+    speaking:  ['rgba(34,197,94,0.55)','rgba(22,163,74,0.45)','rgba(74,222,128,0.60)'],
+    alert:     ['rgba(239,68,68,0.50)','rgba(249,115,22,0.40)','rgba(220,38,38,0.55)'],
   };
   const [c1,c2,c3] = orbColors[floraState];
 
@@ -1543,19 +1543,19 @@ html,body,#dashboard {
   width:60px;height:60px;border-radius:50%;
   cursor:pointer;z-index:100;
   display:flex;align-items:center;justify-content:center;
-  background:var(--surface);
-  border:1px solid var(--border);
-  box-shadow:0 2px 12px rgba(0,0,0,0.08);
-  transition:box-shadow 0.3s,transform 0.2s,border-color 0.3s;
-  overflow:hidden;
+  background:transparent;
+  border:none;
+  box-shadow:none;
+  transition:transform 0.2s;
+  overflow:visible;
 }
 .flora-fab:hover {
-  box-shadow:0 4px 20px rgba(0,0,0,0.12);
+  box-shadow:none;
   transform:scale(1.08);
 }
 .flora-fab-active {
-  border-color:var(--text);
-  box-shadow:0 2px 20px rgba(16,185,129,0.25);
+  border:none;
+  box-shadow:none;
 }
 .flora-fab-hidden {
   opacity:0;transform:scale(0.5);pointer-events:none;

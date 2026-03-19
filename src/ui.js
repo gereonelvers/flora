@@ -4,7 +4,7 @@
  */
 
 import { sendToAgent, parseActions } from './agent-client.js';
-import { createInitialState, advanceSol, applyActions, saveState, loadState, resetState, CROP_DB } from './greenhouse.js';
+import { createInitialState, advanceSol, applyActions, saveState, loadState, resetState } from './greenhouse.js';
 
 let state = createInitialState(); // overwritten by async init in initUI
 let chatHistory = [];
@@ -37,30 +37,6 @@ export function initUI() {
     <div class="hud-header">
       <span class="hud-label">MISSION STATUS</span>
       <span class="hud-sol" id="hud-sol">SOL 1 / 450</span>
-    </div>
-    <div class="hud-grid">
-      <div class="hud-card">
-        <div class="hud-card-label">Phase</div>
-        <div class="hud-card-value" id="hud-phase">Setup</div>
-      </div>
-      <div class="hud-card">
-        <div class="hud-card-label">Nutrition</div>
-        <div class="hud-card-value" id="hud-nutrition">0%</div>
-      </div>
-      <div class="hud-card">
-        <div class="hud-card-label">Water</div>
-        <div class="hud-card-value" id="hud-water">5000 L</div>
-      </div>
-      <div class="hud-card">
-        <div class="hud-card-label">Crops Active</div>
-        <div class="hud-card-value" id="hud-crops">0</div>
-      </div>
-    </div>
-    <div class="hud-modules" id="hud-modules"></div>
-    <div class="hud-time" id="hud-time">
-      <span class="hud-time-label">TIME</span>
-      <span class="hud-time-value" id="hud-clock">06:00</span>
-      <span class="hud-speed" id="hud-speed">1x</span>
     </div>
     <div class="hud-actions">
       <button id="btn-speed-0" class="hud-btn hud-speed-btn">⏸</button>
@@ -101,15 +77,13 @@ export function initUI() {
     }
   });
 
-  // Speed controls — true multipliers (1x = real time, 1 sol = 24.65h)
+  // Speed controls
   const speedBtns = { 0: 'btn-speed-0', 1: 'btn-speed-1', 1500: 'btn-speed-1500', 5000: 'btn-speed-5000', 15000: 'btn-speed-15000' };
   const speedLabels = { 0: 'PAUSED', 1: '1× REAL', 1500: '1.5k×', 5000: '5k×', 15000: '15k×' };
   const setSpeed = (s) => {
     if (window.__flora3d) window.__flora3d.setSimSpeed(s);
     Object.values(speedBtns).forEach(id => document.getElementById(id)?.classList.remove('active'));
     document.getElementById(speedBtns[s])?.classList.add('active');
-    const el = document.getElementById('hud-speed');
-    if (el) el.textContent = speedLabels[s] || `${s}×`;
   };
   document.getElementById('btn-speed-0').addEventListener('click', () => setSpeed(0));
   document.getElementById('btn-speed-1').addEventListener('click', () => setSpeed(1));
@@ -177,35 +151,6 @@ export function initUI() {
 // ── HUD Update ──────────────────────────────────────────────────────
 function updateHUD() {
   document.getElementById('hud-sol').textContent = `SOL ${state.mission.currentSol} / ${state.mission.totalSols}`;
-  document.getElementById('hud-phase').textContent = state.mission.phase;
-  document.getElementById('hud-nutrition').textContent = `${state.nutrition.coverage_percent}%`;
-  document.getElementById('hud-nutrition').style.color =
-    state.nutrition.coverage_percent >= 80 ? '#4ade80' :
-    state.nutrition.coverage_percent >= 50 ? '#fbbf24' : '#f87171';
-  document.getElementById('hud-water').textContent = `${Math.round(state.resources.water_liters)} L`;
-  document.getElementById('hud-water').style.color =
-    state.resources.water_liters > 2000 ? '#4ade80' :
-    state.resources.water_liters > 1000 ? '#fbbf24' : '#f87171';
-
-  const totalCrops = state.modules.reduce((s, m) => s + m.crops.length, 0);
-  document.getElementById('hud-crops').textContent = totalCrops;
-
-  // Module details
-  const modEl = document.getElementById('hud-modules');
-  modEl.innerHTML = state.modules.map(m => {
-    const usedArea = m.crops.reduce((s, c) => s + c.area_m2, 0);
-    const cropList = m.crops.map(c => {
-      const info = CROP_DB[c.type];
-      const progress = Math.round((c.daysGrown / info.cycle) * 100);
-      return `<span class="mod-crop">${info.name} ${progress}%</span>`;
-    }).join(' ');
-    return `
-      <div class="mod-row">
-        <div class="mod-name">${m.name}</div>
-        <div class="mod-stats">${usedArea}/${m.area_m2}m² · ${m.temp}°C</div>
-        <div class="mod-crops">${cropList || '<span class="mod-empty">Empty</span>'}</div>
-      </div>`;
-  }).join('');
 }
 
 // ── Chat Logic ──────────────────────────────────────────────────────
@@ -287,21 +232,6 @@ const UI_STYLES = `
 .hud-header { display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px; }
 .hud-label { font-family:'DM Mono',monospace;font-size:0.58rem;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.45); }
 .hud-sol { font-family:'DM Mono',monospace;font-size:0.75rem;font-weight:500; }
-.hud-grid { display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(255,255,255,0.06);margin-bottom:10px; }
-.hud-card { background:rgba(0,0,0,0.3);padding:8px 10px; }
-.hud-card-label { font-family:'DM Mono',monospace;font-size:0.52rem;text-transform:uppercase;letter-spacing:0.1em;color:rgba(255,255,255,0.4); }
-.hud-card-value { font-family:'DM Mono',monospace;font-size:0.85rem;font-weight:500;color:rgba(255,255,255,0.88); }
-.hud-modules { max-height:140px;overflow-y:auto;margin-bottom:8px; }
-.mod-row { padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06); }
-.mod-name { font-family:'DM Mono',monospace;font-size:0.6rem;font-weight:500;text-transform:uppercase;letter-spacing:0.06em; }
-.mod-stats { font-family:'DM Mono',monospace;font-size:0.52rem;color:rgba(255,255,255,0.4); }
-.mod-crops { display:flex;flex-wrap:wrap;gap:4px;margin-top:3px; }
-.mod-crop { font-family:'DM Mono',monospace;font-size:0.52rem;border:1px solid rgba(255,255,255,0.1);padding:1px 6px;color:rgba(255,255,255,0.6); }
-.mod-empty { font-family:'DM Mono',monospace;font-size:0.52rem;color:rgba(255,255,255,0.25); }
-.hud-time { display:flex;align-items:baseline;gap:8px;margin-bottom:8px;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06); }
-.hud-time-label { font-family:'DM Mono',monospace;font-size:0.52rem;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.35); }
-.hud-time-value { font-family:'DM Mono',monospace;font-size:1rem;font-weight:500;letter-spacing:0.06em; }
-.hud-speed { font-family:'DM Mono',monospace;font-size:0.62rem;color:rgba(255,255,255,0.4);margin-left:auto; }
 .hud-speed-btn.active { background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.95);border-color:rgba(255,255,255,0.25); }
 .hud-actions { display:flex;gap:4px;flex-wrap:wrap; }
 .hud-btn {
@@ -311,7 +241,6 @@ const UI_STYLES = `
   cursor:pointer;transition:all 0.15s;letter-spacing:0.04em;
 }
 .hud-btn:hover { background:rgba(255,255,255,0.06); }
-.hud-btn-accent { flex-basis:100%;margin-top:2px;border-color:rgba(255,255,255,0.18); }
 .hud-btn-reset { flex-basis:100%;color:rgba(248,113,113,0.8);border-color:rgba(248,113,113,0.2); }
 .hud-btn-reset:hover { border-color:rgba(248,113,113,0.5);background:rgba(248,113,113,0.08); }
 
@@ -357,9 +286,9 @@ const UI_STYLES = `
 .chat-send-btn:hover { background:rgba(255,255,255,0.05); }
 
 /* ── Scrollbar ── */
-.chat-messages::-webkit-scrollbar,.hud-modules::-webkit-scrollbar { width:3px; }
-.chat-messages::-webkit-scrollbar-track,.hud-modules::-webkit-scrollbar-track { background:transparent; }
-.chat-messages::-webkit-scrollbar-thumb,.hud-modules::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1);border-radius:0; }
+.chat-messages::-webkit-scrollbar { width:3px; }
+.chat-messages::-webkit-scrollbar-track { background:transparent; }
+.chat-messages::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1);border-radius:0; }
 
 @media(max-width:900px) {
   #mission-hud { width:220px;top:12px;right:12px; }
