@@ -33,25 +33,82 @@ function resize() {
 window.addEventListener('resize', resize);
 
 const clock = new THREE.Clock();
-
-// ── Real-time sol progression ──────────────────────────────────────
 const REAL_SOL_SEC = 88775;
+
+// ── All sim state lives here, synced to/from server via ui.js ────────
 let solFraction = 0;
-let simSpeed = parseInt(localStorage.getItem('flora-sim-speed') || '1500');
+let simSpeed = 1500;
 let simStarted = false;
 let lastTime = performance.now() / 1000;
+let suppressPoll = false; // prevent polls from overwriting after reset/start
 
-// Expose controls for ui.js and dashboard
+// Read state from server (via ui.js) — called on init and periodically
+function readFromServer() {
+  if (suppressPoll) return;
+  const s = window.__floraUI?.getState?.();
+  if (!s?.mission) return;
+
+  // Speed: always take from server (dashboard may have changed it)
+  if (s.mission.simSpeed != null) simSpeed = s.mission.simSpeed;
+
+  // Started: sync both directions
+  if (s.mission.started && !simStarted) {
+    simStarted = true;
+    solFraction = s.mission.solFraction || 0;
+    // Interpolate to catch up
+    if (s.mission.solFractionUpdatedAt) {
+      const elapsed = (Date.now() - s.mission.solFractionUpdatedAt) / 1000;
+      solFraction = (solFraction + (elapsed / REAL_SOL_SEC) * simSpeed) % 1;
+    }
+    hideStartOverlay();
+  } else if (!s.mission.started && simStarted) {
+    simStarted = false;
+    solFraction = 0;
+    simSpeed = 1500;
+    showStartOverlay();
+  }
+}
+
+// Write state to server (via ui.js) — called every 2s while running
+function writeToServer() {
+  const s = window.__floraUI?.getState?.();
+  if (!s?.mission) return;
+  s.mission.simSpeed = simSpeed;
+  s.mission.solFraction = solFraction;
+  s.mission.solFractionUpdatedAt = Date.now();
+  window.__floraUI?.saveState?.(s);
+}
+
+// ── Expose controls ──────────────────────────────────────────────────
 window.__flora3d = {
   getSimSpeed: () => simSpeed,
-  setSimSpeed: (s) => { simSpeed = s; localStorage.setItem('flora-sim-speed', String(s)); },
+  setSimSpeed: (s) => {
+    simSpeed = s;
+    writeToServer();
+  },
   getSolFraction: () => solFraction,
-  resetSolFraction: () => { solFraction = 0; simStarted = false; showStartOverlay(); },
+  resetSolFraction: () => {
+    suppressPoll = true;
+    solFraction = 0;
+    simSpeed = 1500;
+    simStarted = false;
+    showStartOverlay();
+    setTimeout(() => { suppressPoll = false; }, 5000);
+  },
   isStarted: () => simStarted,
-  start: () => { simStarted = true; hideStartOverlay(); },
+  start: () => {
+    suppressPoll = true;
+    simStarted = true;
+    solFraction = 0;
+    simSpeed = 1500;
+    hideStartOverlay();
+    if (window.__floraUI?.setStarted) window.__floraUI.setStarted(true);
+    writeToServer();
+    setTimeout(() => { suppressPoll = false; }, 3000);
+  },
 };
 
-// ── Start overlay ──────────────────────────────────────────────────
+// ── Start overlay ────────────────────────────────────────────────────
 const startOverlay = document.createElement('div');
 startOverlay.id = 'start-overlay';
 startOverlay.innerHTML = `
@@ -98,52 +155,24 @@ startStyle.textContent = `
 `;
 document.head.appendChild(startStyle);
 
-function hideStartOverlay() {
-  startOverlay.classList.add('hidden');
-}
-function showStartOverlay() {
-  startOverlay.classList.remove('hidden');
-}
+function hideStartOverlay() { startOverlay.classList.add('hidden'); }
+function showStartOverlay() { startOverlay.classList.remove('hidden'); }
 
 document.getElementById('start-3d-btn').onclick = () => {
-  simStarted = true;
-  hideStartOverlay();
-  // Also set started in the UI state so it persists to server
-  if (window.__floraUI?.setStarted) window.__floraUI.setStarted(true);
+  window.__flora3d.start();
 };
 
-// Poll for started flag + speed changes from other tabs (via localStorage)
-setInterval(() => {
-  const serverStarted = window.__floraUI?.getStarted?.() ?? false;
-  if (serverStarted && !simStarted) {
-    simStarted = true;
-    hideStartOverlay();
-  } else if (!serverStarted && simStarted) {
-    simStarted = false;
-    solFraction = 0;
-    showStartOverlay();
-  }
+// ── Poll server state every 500ms ────────────────────────────────────
+setInterval(readFromServer, 500);
 
-  // Speed sync from dashboard
-  const storedSpeed = localStorage.getItem('flora-sim-speed');
-  if (storedSpeed !== null) {
-    const s = parseInt(storedSpeed);
-    if (!isNaN(s) && s !== simSpeed) {
-      simSpeed = s;
-    }
-  }
-
-  // Share solFraction with dashboard
-  localStorage.setItem('flora-sol-fraction', String(solFraction));
-}, 500);
-
-// ── Animation loop ─────────────────────────────────────────────────
+// ── Animation loop ───────────────────────────────────────────────────
 renderer.setAnimationLoop(() => {
   const elapsed = clock.getElapsedTime();
   const now = performance.now() / 1000;
   const dt = Math.min(now - lastTime, 0.1);
   lastTime = now;
 
+  // Advance time
   if (simStarted && simSpeed > 0) {
     solFraction += (dt / REAL_SOL_SEC) * simSpeed;
     if (solFraction >= 1) {
@@ -154,14 +183,17 @@ renderer.setAnimationLoop(() => {
     }
   }
 
-  // Always render the scene (camera orbit works even before start)
-  experience.setTimeOfDay(simStarted ? solFraction : 0.4); // static daytime before start
+  // Write to server every ~2s (always while started, even if paused)
+  if (simStarted && Math.floor(now * 0.5) !== Math.floor((now - dt) * 0.5)) {
+    writeToServer();
+  }
 
+  // Render
+  experience.setTimeOfDay(simStarted ? solFraction : 0.4);
   const currentSol = window.__floraUI?.getCurrentSol?.() ?? 1;
   if (simStarted) {
     experience.setMissionProgress(currentSol, solFraction);
   } else {
-    // Before start: show empty terrain (everything hidden at t<0)
     experience.setMissionProgress(0, 0);
   }
 
@@ -173,5 +205,5 @@ window.addEventListener('dblclick', () => {
   experience.resetCamera();
 });
 
-// Initialize UI
+// Initialize UI (loads state from server)
 const ui = initUI();

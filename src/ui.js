@@ -86,14 +86,18 @@ export function initUI() {
   style.textContent = UI_STYLES;
   document.head.appendChild(style);
 
+  let uiSuppressPoll = false;
+
   // ── Wire events ──
   document.getElementById('btn-advance-10').addEventListener('click', () => { state = advanceSol(state, 10); saveState(state); updateHUD(); });
   document.getElementById('btn-advance-30').addEventListener('click', () => { state = advanceSol(state, 30); saveState(state); updateHUD(); });
   document.getElementById('btn-reset').addEventListener('click', () => {
     if (confirm('Reset simulation to Sol 1? All crops, harvests, and progress will be lost.')) {
+      uiSuppressPoll = true;
       state = resetState();
       updateHUD();
       window.__flora3d?.resetSolFraction?.();
+      setTimeout(() => { uiSuppressPoll = false; }, 5000);
     }
   });
 
@@ -131,6 +135,8 @@ export function initUI() {
     getCurrentSol: () => state.mission.currentSol,
     getStarted: () => state.mission?.started ?? false,
     setStarted: (v) => { state.mission.started = v; saveState(state); },
+    getState: () => state,
+    saveState: (s) => { state = s; saveState(s); },
   };
 
   // Update time-of-day clock every 200ms
@@ -151,24 +157,21 @@ export function initUI() {
 
   // Poll server for changes every 3s (cross-device sync)
   setInterval(async () => {
+    if (uiSuppressPoll) return;
     const saved = await loadState();
     if (saved && JSON.stringify(saved) !== JSON.stringify(state)) {
-      const prevSol = state.mission.currentSol;
-      // Preserve started flag — never regress from true to false via polling
-      if (state.mission?.started && !saved.mission?.started) {
-        saved.mission.started = true;
-      }
       state = saved;
       updateHUD();
-      // Detect reset (sol went backwards) — reset the 3D animation clock
-      if (saved.mission.currentSol < prevSol) {
-        window.__flora3d?.resetSolFraction?.();
-      }
     }
   }, 3000);
 
   updateHUD();
-  return { getState: () => state, setState: (s) => { state = s; saveState(s); updateHUD(); } };
+  return {
+    getState: () => state,
+    setState: (s) => { state = s; saveState(s); updateHUD(); },
+    saveState: (s) => { state = s; saveState(s); },
+    suppressPoll: (ms) => { uiSuppressPoll = true; setTimeout(() => { uiSuppressPoll = false; }, ms); },
+  };
 }
 
 // ── HUD Update ──────────────────────────────────────────────────────

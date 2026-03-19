@@ -136,6 +136,9 @@ function createInitialState() {
       phase: 'Setup',
       morale: CREW.morale_base,
       started: false,
+      simSpeed: 1500,
+      solFraction: 0,
+      solFractionUpdatedAt: Date.now(), // timestamp for cross-device interpolation
     },
     modules: [
       { id: 1, name: 'Module Alpha', area_m2: 30, crops: [], temp: 19, humidity: 60, co2: 800, light: 250, temp_target: 19, hvac_status: 1.0, onlineSol: 2 },

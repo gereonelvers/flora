@@ -1233,12 +1233,17 @@ function render() {
   if (clockEl && speedMenu) {
     clockEl.onclick = (e) => { e.stopPropagation(); speedMenu.classList.toggle('open'); };
     speedMenu.querySelectorAll('.d-speed-opt').forEach(opt => {
-      opt.onclick = () => {
+      opt.onclick = async () => {
         const s = parseInt(opt.dataset.speed);
-        // Sync speed via localStorage (cross-tab communication)
-        localStorage.setItem('flora-sim-speed', String(s));
-        if (window.__flora3d) window.__flora3d.setSimSpeed(s);
         speedMenu.classList.remove('open');
+        // Fetch latest state to avoid overwriting 3D view's solFraction
+        try {
+          const latest = await loadState();
+          if (latest) state = latest;
+        } catch {}
+        state.mission.simSpeed = s;
+        state.mission.solFractionUpdatedAt = Date.now();
+        saveState(state);
       };
     });
     document.addEventListener('click', () => speedMenu.classList.remove('open'));
@@ -2042,12 +2047,16 @@ document.head.appendChild(style);
   }
 })();
 
-// Mars clock — reads solFraction from 3D view via localStorage
+// Mars clock — interpolates from server state's solFraction + simSpeed + elapsed time
 setInterval(() => {
-  if (!state.mission.started) return;
+  if (!state.mission?.started) return;
   const el = document.getElementById('d-clock');
   if (!el) return;
-  const frac = parseFloat(localStorage.getItem('flora-sol-fraction') || '0');
+  const baseFrac = state.mission.solFraction || 0;
+  const speed = state.mission.simSpeed ?? 1500;
+  const updatedAt = state.mission.solFractionUpdatedAt || Date.now();
+  const elapsed = (Date.now() - updatedAt) / 1000;
+  const frac = (baseFrac + (elapsed / 88775) * speed) % 1;
   const hours = Math.floor(frac * 24.65);
   const minutes = Math.floor((frac * 24.65 - hours) * 60);
   el.textContent = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
