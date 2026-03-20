@@ -51,6 +51,10 @@ export function initUI() {
       <button id="btn-advance-30" class="hud-btn">+30 Sols</button>
     </div>
     <div class="hud-actions" style="margin-top:4px">
+      <button id="btn-dust-storm" class="hud-btn hud-btn-storm">Dust Storm</button>
+      <button id="btn-mutation" class="hud-btn hud-btn-mutation">Mutation</button>
+    </div>
+    <div class="hud-actions" style="margin-top:4px">
       <button id="btn-reset" class="hud-btn hud-btn-reset">Reset Simulation</button>
     </div>
   `;
@@ -68,6 +72,83 @@ export function initUI() {
   // ── Wire events ──
   document.getElementById('btn-advance-10').addEventListener('click', () => { state = advanceSol(state, 10); saveState(state); updateHUD(); });
   document.getElementById('btn-advance-30').addEventListener('click', () => { state = advanceSol(state, 30); saveState(state); updateHUD(); });
+  document.getElementById('btn-dust-storm').addEventListener('click', () => {
+    // Inject a catastrophic dust storm to force an emergency escalation
+    const sol = state.mission.currentSol;
+    const severity = 0.82 + Math.random() * 0.08; // 82-90% solar reduction — catastrophic
+    const duration = 12 + Math.floor(Math.random() * 8); // 12-19 sols
+    const stormEvent = {
+      id: 'dust_storm',
+      name: 'Dust Storm',
+      desc: `CATASTROPHIC global dust storm reducing solar output by ${Math.round(severity * 100)}% — energy reserves critical`,
+      sol_start: sol,
+      sol_end: sol + duration,
+      severity,
+      effect: 'solar_reduction',
+    };
+
+    // Remove any existing dust storm and inject new one
+    state.events = (state.events || []).filter(e => e.id !== 'dust_storm');
+    state.events.push(stormEvent);
+    state.eventLog = state.eventLog || [];
+    state.eventLog.push({ ...stormEvent, logged: true });
+    state.alerts = state.alerts || [];
+    state.alerts.push({
+      type: 'dust_storm',
+      sol,
+      message: `CATASTROPHIC Dust Storm: ${stormEvent.desc}`,
+      severity: 'critical',
+    });
+
+    // Apply immediate effects: cripple solar + drain battery reserve
+    state.resources.solar_efficiency = Math.max(0.05, 1 - severity);
+    state.resources.energy_stored_kwh = Math.min(state.resources.energy_stored_kwh, 150); // drain battery to critical
+
+    saveState(state);
+    updateHUD();
+    // Dashboard will detect the new event via polling and wake Flora automatically
+  });
+  document.getElementById('btn-mutation').addEventListener('click', () => {
+    const sol = state.mission.currentSol;
+    // Pick a random crop from active modules
+    const activeCrops = [];
+    for (const m of state.modules || []) {
+      for (const c of m.crops || []) activeCrops.push(c.type);
+    }
+    const targetCrop = activeCrops.length > 0
+      ? activeCrops[Math.floor(Math.random() * activeCrops.length)]
+      : 'potato';
+
+    const geneLength = 5428;
+    const pos = Math.floor(Math.random() * (geneLength - 20)) + 11;
+    const kind = Math.random() < 0.75 ? 'snv' : 'del';
+    const bases = ['A', 'C', 'G', 'T'];
+    const alt = kind === 'snv' ? bases[Math.floor(Math.random() * 4)] : null;
+
+    if (!state.genetics) state.genetics = { mutations: [], totalRadiationEvents: 0 };
+    state.genetics.mutations.push({
+      id: `mut-${sol}-${pos}`,
+      sol,
+      crop: targetCrop,
+      gene: 'GBSS',
+      kind, pos, alt,
+      scored: false,
+      delta_score: null,
+      interpretation: 'pending',
+      probabilities: null,
+    });
+    state.genetics.totalRadiationEvents++;
+
+    state.alerts = state.alerts || [];
+    state.alerts.push({
+      type: 'dna_mutation', sol,
+      message: `Radiation-induced DNA mutation detected in ${targetCrop} GBSS gene at pos ${pos}`,
+      severity: 'warning',
+    });
+
+    saveState(state);
+    updateHUD();
+  });
   document.getElementById('btn-reset').addEventListener('click', () => {
     if (confirm('Reset simulation to Sol 1? All crops, harvests, and progress will be lost.')) {
       uiSuppressPoll = true;
@@ -249,6 +330,10 @@ const UI_STYLES = `
   cursor:pointer;transition:all 0.15s;letter-spacing:0.04em;
 }
 .hud-btn:hover { background:rgba(255,255,255,0.06); }
+.hud-btn-storm { color:rgba(251,191,36,0.9);border-color:rgba(251,191,36,0.25); }
+.hud-btn-storm:hover { border-color:rgba(251,191,36,0.6);background:rgba(251,191,36,0.1); }
+.hud-btn-mutation { color:rgba(168,85,247,0.9);border-color:rgba(168,85,247,0.25); }
+.hud-btn-mutation:hover { border-color:rgba(168,85,247,0.6);background:rgba(168,85,247,0.1); }
 .hud-btn-reset { flex-basis:100%;color:rgba(248,113,113,0.8);border-color:rgba(248,113,113,0.2); }
 .hud-btn-reset:hover { border-color:rgba(248,113,113,0.5);background:rgba(248,113,113,0.08); }
 

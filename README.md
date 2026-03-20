@@ -17,9 +17,10 @@ Autonomous AI-driven Mars greenhouse management system for a 450-sol surface mis
     │   │  Three.js scene    │       │  Mission metrics   │          │  Browser mic input │    │
     │   │  Day/night cycle   │       │  Module controls   │          │  16kHz PCM audio   │    │
     │   │  Orbital camera    │       │  Genetics viewer   │          │  24kHz PCM output  │    │
-    │   │  Particle effects  │       │  Harvest logs      │          │  Barge-in support  │    │
+    │   │  Dust storm VFX    │       │  Harvest logs      │          │  Barge-in support  │    │
     │   │  Sol progression   │       │  Real-time charts  │          │  FLORA orb avatar  │    │
-    │   │  Sim speed control │       │  FLORA chat panel  │          │                    │    │
+    │   │  Sim speed control │       │  FLORA chat +      │          │                    │    │
+    │   │  Event triggers    │       │    escalation UI   │          │                    │    │
     │   └────────┬───────────┘       └─────────┬──────────┘          └─────────┬──────────┘    │
     └────────────┼─────────────────────────────┼──────────────────────────────┼────────────────┘
                  │                             │                              │
@@ -109,7 +110,7 @@ Autonomous AI-driven Mars greenhouse management system for a 450-sol surface mis
 | Service | Purpose |
 |---|---|
 | **API Gateway** | REST endpoints for agent queries (`/agent`), state sync (`/state`), and mutation scoring (`/score`) |
-| **Lambda** | Agent handler (Claude Bedrock + MCP tool calls) and Evo 2 mutation scoring wrapper |
+| **Lambda** | Agent handler (Claude Bedrock + MCP tool calls + `ask_user`/`alert_crew` tools) and Evo 2 mutation scoring wrapper |
 | **Bedrock** | Claude Sonnet 4.6 for autonomous decision-making; Nova Sonic v1 for multimodal voice |
 | **Bedrock AgentCore** | MCP Gateway serving Syngenta agricultural knowledge base (us-east-2) |
 | **CloudFront** | CDN + WebSocket termination for the voice server |
@@ -129,16 +130,17 @@ Autonomous AI-driven Mars greenhouse management system for a 450-sol surface mis
 ```
 start-hack-2026/
 ├── src/                          # Frontend (Vite + vanilla JS)
-│   ├── main.js                   # Entry point, Three.js renderer, mission clock
-│   ├── scene.js                  # 3D Mars base (terrain, greenhouses, lighting, particles)
+│   ├── main.js                   # Entry point, Three.js renderer, mission clock, dust storm VFX bridge
+│   ├── scene.js                  # 3D Mars base (terrain, greenhouses, lighting, particles, dust storm VFX)
+│   ├── ui.js                     # 3D view HUD (speed controls, sol advance, event triggers)
 │   ├── greenhouse.js             # Core simulation engine (crops, stress, events, resources)
-│   ├── dashboard.js              # Crew dashboard (metrics, modules, genetics, chat, voice)
-│   ├── agent-client.js           # Agent API client + autonomous scan logic
+│   ├── dashboard.js              # Crew dashboard (metrics, modules, genetics, chat, voice, escalation UI)
+│   ├── agent-client.js           # Agent API client + autonomous scan + escalation/alert parsing
 │   ├── dna.js                    # Evo 2 mutation scoring client + potato GBSS reference
 │   ├── noise.js                  # Procedural terrain generation
 │   └── style.css
 ├── agent/                        # Backend — Agent Lambda
-│   └── lambda_function.py        # Claude Bedrock converse + MCP tool use + state mutation
+│   └── lambda_function.py        # Claude Bedrock converse + MCP/ask_user/alert_crew tools + state mutation
 ├── voice-server/                 # Backend — Voice streaming
 │   ├── server.js                 # WebSocket server → Nova Sonic bidirectional stream
 │   ├── Dockerfile
@@ -158,14 +160,20 @@ start-hack-2026/
 
 ## Key Data Flows
 
-### Autonomous Scan (every ~10 sols)
+### Autonomous Scan (scheduled + emergency-triggered)
 1. Dashboard builds situation report (crew health, modules, resources, events, genetics)
 2. POST to `/agent` with `autonomous: true` and full greenhouse state
 3. Lambda fetches fresh state, calls Claude Sonnet 4.6 via Bedrock `converse()`
-4. Claude may invoke MCP knowledge base tool (up to 6 tool-use loops)
+4. Claude may invoke tools (up to 6 tool-use loops):
+   - **`query_knowledge_base`** — retrieves crop profiles, stress data from Syngenta MCP knowledge base
+   - **`ask_user`** — escalates critical decisions to crew with two action options (e.g., during a catastrophic dust storm: "Dim LEDs" vs "Shut down a module"). Crew sees a red alert with clickable buttons; one option is marked as recommended
+   - **`alert_crew`** — notifies crew about something requiring review (e.g., DNA mutation detected) with a button navigating to the relevant dashboard tab. Auto-triggers Evo 2 scoring for DNA alerts
 5. Claude returns JSON with `auto_actions` (applied immediately) and `approval_actions` (shown to crew)
-6. Lambda applies auto actions to state, saves via `/state` API
-7. Dashboard polls `/state` and picks up changes + journal entries
+6. Lambda applies auto actions + persists escalations/alerts to state, saves via `/state` API
+7. Dashboard polls `/state` and picks up changes, escalations, alerts, and journal entries
+8. Simulation slows to real-time (1x) while Flora thinks, resumes at previous speed when done
+
+**Emergency triggers** (wake Flora regardless of schedule): new events (dust storms, equipment failures), crew starvation, empty online modules, new DNA mutations.
 
 ### Voice Interaction
 1. Browser captures mic audio → 16kHz PCM → base64 → WebSocket
@@ -187,9 +195,10 @@ start-hack-2026/
 - **Crops**: Potato, Lettuce, Bean, Radish, Spinach, Herb — each with unique growth cycles, yields, and stress tolerances
 - **Modules**: 3 greenhouse modules (30 m² each) with independent environmental controls
 - **Stress factors**: Temperature, light, humidity, CO2 — with exponential damage curves and accumulated permanent degradation
-- **Random events**: Dust storms, HVAC failures, water recycler faults, CO2 scrubber issues, LED panel failures
-- **Resources**: Water (5000L initial, 92% recycling), energy (200 kWh solar, 800 kWh battery), food reserves (60-day emergency rations)
-- **Crew**: 4 astronauts with individual health, caloric needs (2500 kcal/day each), and morale tracking
+- **Random events**: Dust storms (with 3D visual: thickened fog, particle storms, dimmed sunlight), HVAC failures, water recycler faults, CO2 scrubber issues, LED panel failures
+- **Resources**: Water (5000L initial, 92% recycling), energy (500 kWh peak solar, 2000 kWh battery), food reserves (120-day emergency rations)
+- **Crew**: 4 astronauts with individual health, variable daily caloric needs (activity-dependent), and morale tracking
+- **DNA mutations**: Cosmic radiation causes random mutations in crop GBSS genes; scored by Evo 2 as disruptive/suspicious/neutral
 
 ## Running Locally
 

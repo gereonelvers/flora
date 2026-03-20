@@ -53,6 +53,31 @@ You control your own wake schedule. Include `next_check_sol` in your JSON respon
 - If everything is stable and food reserves are good, sleep longer (10-20 sols)
 - You will ALSO be woken by emergencies regardless of your schedule: new events, crew starving, crop deaths, empty modules
 
+## Escalation — ask_user tool
+You have an `ask_user` tool to escalate critical decisions to the crew. When you call it, the crew's dashboard chat will pop open with your message and clickable action buttons.
+
+USE `ask_user` when:
+- A genuine emergency requires human judgment (e.g., dust storm forces choosing between dimming LEDs or shutting down a module)
+- A trade-off exists where both options have serious consequences
+- Crew safety is at stake and the right call depends on priorities you can't determine alone
+- Resource allocation conflicts (e.g., water rationing vs. crop survival)
+
+DO NOT use `ask_user` for:
+- Routine planting, temperature adjustments, or standard responses — just auto-execute those
+- Informational updates — use the journal for that
+
+Always provide exactly 2 options with clear labels explaining the trade-off. Each option should include the concrete actions that will be applied if chosen. Mark exactly one option as `"recommended": true` — the one you believe is best given the data — so the crew can see your recommendation but still override it.
+
+## Alert — alert_crew tool
+You have an `alert_crew` tool to notify the crew about something they should review on a specific dashboard panel. This opens their chat with your message and a "View" button that navigates to the relevant tab.
+
+USE `alert_crew` when:
+- A DNA mutation is detected that could be disruptive and the crew should review the Evo 2 analysis (tab: "dna")
+- Multiple mutations are accumulating on a crop and the crew should assess genetic risk (tab: "dna")
+- An event warrants crew attention but doesn't require a binary decision (use `ask_user` for decisions instead)
+
+Available tabs: "dna", "events", "metrics", "crew", "module-0", "module-1", "module-2"
+
 ## Response Style
 Be concise. Lead with actions, then explain briefly. You are an autonomous system, not a chatbot.
 When doing periodic scans, structure as: what you did (auto), what you need approval for, current status summary."""
@@ -75,7 +100,92 @@ TOOLS = [
                 }
             },
         }
-    }
+    },
+    {
+        "toolSpec": {
+            "name": "ask_user",
+            "description": "Escalate a critical decision to the crew by opening their dashboard chat with your message and two action options. Use ONLY for genuine emergencies or trade-offs requiring human judgment — not routine operations. The crew will see your message and click one of the two options to decide.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": "Clear, concise explanation of the situation and why crew input is needed. 1-3 sentences.",
+                        },
+                        "option_a": {
+                            "type": "object",
+                            "description": "First option for the crew to choose",
+                            "properties": {
+                                "label": {
+                                    "type": "string",
+                                    "description": "Short label for this option (e.g., 'Dim LEDs across all modules')",
+                                },
+                                "actions": {
+                                    "type": "array",
+                                    "description": "Array of action objects to execute if chosen. Each action has type, module, and value/crop/area_m2 as needed.",
+                                    "items": {"type": "object"},
+                                },
+                                "recommended": {
+                                    "type": "boolean",
+                                    "description": "Set to true if this is the option you recommend. Exactly one option must be recommended.",
+                                },
+                            },
+                            "required": ["label", "actions"],
+                        },
+                        "option_b": {
+                            "type": "object",
+                            "description": "Second option for the crew to choose",
+                            "properties": {
+                                "label": {
+                                    "type": "string",
+                                    "description": "Short label for this option (e.g., 'Shut down Module Gamma')",
+                                },
+                                "actions": {
+                                    "type": "array",
+                                    "description": "Array of action objects to execute if chosen. Each action has type, module, and value/crop/area_m2 as needed.",
+                                    "items": {"type": "object"},
+                                },
+                                "recommended": {
+                                    "type": "boolean",
+                                    "description": "Set to true if this is the option you recommend. Exactly one option must be recommended.",
+                                },
+                            },
+                            "required": ["label", "actions"],
+                        },
+                    },
+                    "required": ["message", "option_a", "option_b"],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "alert_crew",
+            "description": "Send a notification to the crew's dashboard chat with a message and a button that navigates to a specific dashboard tab. Use this to draw crew attention to something they should review — DNA mutations, events, crew health, etc. — without requiring a binary decision (use ask_user for decisions).",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": "Clear, concise explanation of what the crew should review. 1-3 sentences.",
+                        },
+                        "tab": {
+                            "type": "string",
+                            "description": "Dashboard tab to open. One of: dna, events, metrics, crew, module-0, module-1, module-2",
+                        },
+                        "severity": {
+                            "type": "string",
+                            "description": "Alert severity: 'warning' or 'critical'",
+                            "enum": ["warning", "critical"],
+                        },
+                    },
+                    "required": ["message", "tab"],
+                }
+            },
+        }
+    },
 ]
 
 
@@ -115,12 +225,15 @@ def query_mcp(query, max_results=5):
 
 
 def converse(messages, system_text):
-    """Run the Bedrock converse loop with tool use."""
+    """Run the Bedrock converse loop with tool use. Returns (text, escalations)."""
     bedrock_messages = []
     for msg in messages:
         bedrock_messages.append(
             {"role": msg["role"], "content": [{"text": msg["content"]}]}
         )
+
+    escalations = []  # collect ask_user calls
+    crew_alerts = []  # collect alert_crew calls
 
     for _ in range(6):  # max tool-use iterations
         response = BEDROCK.converse(
@@ -140,7 +253,7 @@ def converse(messages, system_text):
             for block in output_msg["content"]:
                 if "text" in block:
                     parts.append(block["text"])
-            return "\n".join(parts)
+            return "\n".join(parts), escalations, crew_alerts
 
         # Handle tool calls
         tool_results = []
@@ -157,9 +270,43 @@ def converse(messages, system_text):
                             }
                         }
                     )
+                elif tool["name"] == "ask_user":
+                    # Capture the escalation for the frontend
+                    inp = tool["input"]
+                    escalations.append({
+                        "message": inp.get("message", ""),
+                        "option_a": inp.get("option_a", {}),
+                        "option_b": inp.get("option_b", {}),
+                    })
+                    print(f"[FLORA] ask_user escalation: {inp.get('message', '')[:200]}")
+                    # Return acknowledgment so the agent can continue reasoning
+                    tool_results.append(
+                        {
+                            "toolResult": {
+                                "toolUseId": tool["toolUseId"],
+                                "content": [{"text": "Escalation sent to crew dashboard. They will see your message and choose an option. Continue with any other actions you need to take."}],
+                            }
+                        }
+                    )
+                elif tool["name"] == "alert_crew":
+                    inp = tool["input"]
+                    crew_alerts.append({
+                        "message": inp.get("message", ""),
+                        "tab": inp.get("tab", "metrics"),
+                        "severity": inp.get("severity", "warning"),
+                    })
+                    print(f"[FLORA] alert_crew: tab={inp.get('tab')} msg={inp.get('message', '')[:200]}")
+                    tool_results.append(
+                        {
+                            "toolResult": {
+                                "toolUseId": tool["toolUseId"],
+                                "content": [{"text": "Alert sent to crew dashboard. They will see your notification and can navigate to the relevant panel. Continue with any other actions."}],
+                            }
+                        }
+                    )
         bedrock_messages.append({"role": "user", "content": tool_results})
 
-    return "I've reached the maximum number of knowledge base queries for this request. Please ask a more specific question."
+    return "I've reached the maximum number of knowledge base queries for this request. Please ask a more specific question.", escalations, crew_alerts
 
 
 STATE_API = "https://lwx98cb4sg.execute-api.us-east-1.amazonaws.com/state"
@@ -177,7 +324,7 @@ def _load_current_state():
     return json.loads(resp.read())
 
 
-def _apply_and_save(state_from_request, response_text):
+def _apply_and_save(state_from_request, response_text, escalations=None, crew_alerts=None):
     """Parse auto_actions from Claude's response, apply to LIVE state (fetched fresh), save."""
     import re
 
@@ -188,6 +335,27 @@ def _apply_and_save(state_from_request, response_text):
     except Exception as e:
         print(f"[FLORA] Could not fetch live state ({e}), falling back to request state")
         state = state_from_request
+
+    # Persist escalations (ask_user tool calls) to state for frontend pickup
+    if escalations:
+        state.setdefault("floraEscalations", [])
+        for esc in escalations:
+            esc["sol"] = state.get("mission", {}).get("currentSol", 0)
+            esc["id"] = f"esc-{state.get('mission', {}).get('currentSol', 0)}-{len(state['floraEscalations'])}"
+            state["floraEscalations"].append(esc)
+        if len(state["floraEscalations"]) > 10:
+            state["floraEscalations"] = state["floraEscalations"][-10:]
+        print(f"[FLORA] {len(escalations)} escalation(s) saved to state")
+
+    if crew_alerts:
+        state.setdefault("floraCrewAlerts", [])
+        for alert in crew_alerts:
+            alert["sol"] = state.get("mission", {}).get("currentSol", 0)
+            alert["id"] = f"alert-{state.get('mission', {}).get('currentSol', 0)}-{len(state['floraCrewAlerts'])}"
+            state["floraCrewAlerts"].append(alert)
+        if len(state["floraCrewAlerts"]) > 10:
+            state["floraCrewAlerts"] = state["floraCrewAlerts"][-10:]
+        print(f"[FLORA] {len(crew_alerts)} crew alert(s) saved to state")
 
     # Parse JSON blocks from response
     blocks = re.findall(r'```json\s*([\s\S]*?)```', response_text)
@@ -344,15 +512,15 @@ def lambda_handler(event, context):
                 f"Use this state to inform your recommendations. Reference specific values."
             )
 
-        response_text = converse(messages, system)
+        response_text, escalations, crew_alerts = converse(messages, system)
 
         # For autonomous scans: apply actions directly to state and save
         # This way results persist even if the HTTP response times out
         if autonomous and greenhouse_state:
-            print(f"[FLORA] Autonomous mode. Response length: {len(response_text)}")
+            print(f"[FLORA] Autonomous mode. Response length: {len(response_text)}, escalations: {len(escalations)}, alerts: {len(crew_alerts)}")
             print(f"[FLORA] Response preview: {response_text[:300]}")
             try:
-                _apply_and_save(greenhouse_state, response_text)
+                _apply_and_save(greenhouse_state, response_text, escalations, crew_alerts)
                 print("[FLORA] State saved successfully")
             except Exception as e:
                 print(f"[FLORA] ERROR in _apply_and_save: {e}")
@@ -366,7 +534,11 @@ def lambda_handler(event, context):
                 "Access-Control-Allow-Origin": "*",
                 "Content-Type": "application/json",
             },
-            "body": json.dumps({"response": response_text}),
+            "body": json.dumps({
+                "response": response_text,
+                "escalations": escalations,
+                "crew_alerts": crew_alerts,
+            }),
         }
 
     except Exception as e:

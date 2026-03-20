@@ -103,13 +103,21 @@ Analyze this state and take action. Remember:
 
     if (res.ok) {
       const data = await res.json();
-      return parseAutonomousResponse(data.response);
+      const result = parseAutonomousResponse(data.response);
+      // Merge escalations from the HTTP response (ask_user tool calls)
+      if (data.escalations && data.escalations.length > 0) {
+        result.escalations = (result.escalations || []).concat(data.escalations);
+      }
+      if (data.crew_alerts && data.crew_alerts.length > 0) {
+        result.crewAlerts = (result.crewAlerts || []).concat(data.crew_alerts);
+      }
+      return result;
     }
     // API Gateway timeout (504) — Lambda is still running, results will come via state polling
-    return { response: '', autoActions: [], approvalActions: [], summary: 'FLORA is analyzing... results will appear shortly.' };
+    return { response: '', autoActions: [], approvalActions: [], escalations: [], crewAlerts: [], summary: 'FLORA is analyzing... results will appear shortly.' };
   } catch {
     // Network timeout or error — Lambda may still be running in background
-    return { response: '', autoActions: [], approvalActions: [], summary: 'FLORA is analyzing in the background...' };
+    return { response: '', autoActions: [], approvalActions: [], escalations: [], crewAlerts: [], summary: 'FLORA is analyzing in the background...' };
   }
 }
 
@@ -121,6 +129,8 @@ function parseAutonomousResponse(responseText) {
     response: responseText,
     autoActions: [],
     approvalActions: [],
+    escalations: [],
+    crewAlerts: [],
     summary: '',
     nextCheckSol: null,
   };

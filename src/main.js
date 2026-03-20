@@ -53,6 +53,7 @@ function readFromServer() {
   // Started: sync both directions
   if (s.mission.started && !simStarted) {
     simStarted = true;
+    localSolOffset = Math.max(0, (s.mission.currentSol || 1) - 1);
     solFraction = s.mission.solFraction || 0;
     // Interpolate to catch up
     if (s.mission.solFractionUpdatedAt) {
@@ -63,6 +64,7 @@ function readFromServer() {
   } else if (!s.mission.started && simStarted) {
     simStarted = false;
     solFraction = 0;
+    localSolOffset = 0;
     simSpeed = 1500;
     showStartOverlay();
   }
@@ -87,9 +89,9 @@ async function writeToServer() {
     if (serverState.mission.simSpeed != null) simSpeed = serverState.mission.simSpeed;
 
     // Show/hide Flora thinking notice
-    const paused = serverState.floraPausedSpeed != null && serverState.mission.simSpeed === 0;
+    const thinking = serverState.floraPausedSpeed != null && serverState.mission.simSpeed <= 1;
     const noticeEl = document.getElementById('flora-thinking-notice');
-    if (noticeEl) noticeEl.classList.toggle('hidden', !paused);
+    if (noticeEl) noticeEl.classList.toggle('hidden', !thinking);
 
     // Update ONLY time fields on the server state — never clobber other writers
     serverState.mission.solFraction = solFraction;
@@ -132,6 +134,7 @@ window.__flora3d = {
   resetSolFraction: () => {
     suppressPoll = true;
     solFraction = 0;
+    localSolOffset = 0;
     simSpeed = 1500;
     simStarted = false;
     showStartOverlay();
@@ -142,6 +145,7 @@ window.__flora3d = {
     suppressPoll = true;
     simStarted = true;
     solFraction = 0;
+    localSolOffset = 0;
     simSpeed = 1500;
     hideStartOverlay();
     if (window.__floraUI?.setStarted) window.__floraUI.setStarted(true);
@@ -210,7 +214,7 @@ floraNotice.id = 'flora-thinking-notice';
 floraNotice.className = 'hidden';
 floraNotice.innerHTML = `
   <div class="flora-notice-dot"></div>
-  <span>FLORA is analyzing — simulation paused</span>
+  <span>FLORA is analyzing — running real-time</span>
 `;
 root.appendChild(floraNotice);
 
@@ -244,6 +248,7 @@ setInterval(readFromServer, 500);
 
 // ── Simulation tick (setInterval — keeps running in background tabs) ──
 let simLastTime = performance.now() / 1000;
+let localSolOffset = 0; // incremented synchronously to avoid render glitches
 
 setInterval(() => {
   const now = performance.now() / 1000;
@@ -254,6 +259,7 @@ setInterval(() => {
     solFraction += (dt / REAL_SOL_SEC) * simSpeed;
     while (solFraction >= 1) {
       solFraction -= 1;
+      localSolOffset++; // sync increment — render loop sees this immediately
       if (window.__floraUI?.advanceSol) {
         window.__floraUI.advanceSol();
       }
@@ -270,14 +276,19 @@ setInterval(() => {
 renderer.setAnimationLoop(() => {
   const elapsed = clock.getElapsedTime();
 
-  const currentSolForLight = window.__floraUI?.getCurrentSol?.() ?? 1;
-  experience.setTimeOfDay(simStarted ? (currentSolForLight <= 1 ? 0.4 : solFraction) : 0.4);
-  const currentSol = window.__floraUI?.getCurrentSol?.() ?? 1;
+  // Use localSolOffset for smooth rendering — avoids glitch when async advanceSol lags
+  const renderSol = 1 + localSolOffset;
+  experience.setTimeOfDay(simStarted ? (renderSol <= 1 ? 0.4 : solFraction) : 0.4);
   if (simStarted) {
-    experience.setMissionProgress(currentSol, solFraction);
+    experience.setMissionProgress(renderSol, solFraction);
   } else {
     experience.setMissionProgress(0, 0);
   }
+
+  // Dust storm visual — check state for active dust_storm event
+  const uiState = window.__floraUI?.getState?.();
+  const stormEvent = (uiState?.events || []).find(e => e.effect === 'solar_reduction');
+  experience.setDustStorm(stormEvent ? stormEvent.severity : 0);
 
   experience.update(elapsed);
   experience.render();

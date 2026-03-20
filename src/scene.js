@@ -1659,10 +1659,27 @@ function createDustLayers(scene, textures, animated) {
   });
   scene.add(lowLayer.points);
 
+  // Dense storm layer — hidden by default, activated by setDustStorm
+  const stormLayer = createDustLayer({
+    count: 800,
+    area: 480,
+    minHeight: 0,
+    maxHeight: 60,
+    speed: 0.35,
+    size: 4.5,
+    textures,
+    color: 0xc87a45,
+    opacity: 0,
+  });
+  scene.add(stormLayer.points);
+
   animated.push((elapsed) => {
     highLayer.update(elapsed);
     lowLayer.update(elapsed);
+    stormLayer.update(elapsed);
   });
+
+  return { highLayer, lowLayer, stormLayer };
 }
 
 export function createMarsBaseExperience(renderer) {
@@ -1703,7 +1720,13 @@ export function createMarsBaseExperience(renderer) {
   createAtmosphere(scene, textures, animated);
   const terrain = createTerrain(scene, textures);
   const { habGroup, ghModules, engineGlow, solarGroup, rover, solarDrop, ghDrops } = createStation(scene, textures, terrain.getHeightAt, animated);
-  createDustLayers(scene, textures, animated);
+  const dustLayers = createDustLayers(scene, textures, animated);
+
+  // Dust storm state
+  let stormIntensity = 0;  // 0 = clear, 1 = full storm
+  const STORM_FOG_COLOR = new THREE.Color(0x8a5030);
+  const baseFogNear = 120;
+  const baseFogFar = 340;
 
   const resetPosition = new THREE.Vector3(82, 30, 76);
   const resetTarget = new THREE.Vector3(6, 11.5, -4);
@@ -1812,11 +1835,11 @@ export function createMarsBaseExperience(renderer) {
         engineGlow.material.opacity = 0;
       }
 
-      rover.visible = t >= 0.3;
+      rover.visible = t >= 0.15;
 
       // ── Supply drop: pod falls → dust on impact → structure revealed ──
       function animateSupplyDrop(drop, startT) {
-        const DUR = 0.08; // total duration in sols
+        const DUR = 0.05; // total duration in sols
         const rel = t - startT;
 
         if (rel < 0) {
@@ -1867,14 +1890,44 @@ export function createMarsBaseExperience(renderer) {
         }
       }
 
-      // Solar: supply drop mid sol 1
-      animateSupplyDrop(solarDrop, 0.12);
+      // Solar: supply drop early sol 1
+      animateSupplyDrop(solarDrop, 0.06);
 
-      // Greenhouses: staggered drops within sol 1
-      const GH_SCHEDULE = [0.3, 0.5, 0.7];
+      // Greenhouses: staggered drops within first half of sol 1
+      const GH_SCHEDULE = [0.15, 0.25, 0.35];
       ghDrops.forEach((drop, i) => {
         animateSupplyDrop(drop, GH_SCHEDULE[i]);
       });
+    },
+    /**
+     * Set dust storm visual intensity.
+     * @param {number} intensity — 0 (clear) to 1 (full storm)
+     */
+    setDustStorm(intensity) {
+      // Smooth transition
+      stormIntensity += (intensity - stormIntensity) * 0.03;
+
+      // Storm particle layer
+      dustLayers.stormLayer.points.material.opacity = stormIntensity * 0.4;
+
+      // Boost existing dust layers
+      dustLayers.highLayer.points.material.opacity = 0.13 + stormIntensity * 0.25;
+      dustLayers.lowLayer.points.material.opacity = 0.09 + stormIntensity * 0.2;
+      dustLayers.highLayer.points.material.size = 2.1 + stormIntensity * 2;
+      dustLayers.lowLayer.points.material.size = 1.24 + stormIntensity * 1.5;
+
+      // Thicken fog — pulls visibility in dramatically
+      const fogMix = stormIntensity * stormIntensity; // quadratic for dramatic close-in
+      scene.fog.near = baseFogNear - fogMix * 80;  // 120 → 40
+      scene.fog.far = baseFogFar - fogMix * 200;   // 340 → 140
+      scene.fog.color.copy(scene.background).lerp(STORM_FOG_COLOR, stormIntensity * 0.6);
+
+      // Dim sunlight
+      lights.sun.intensity = Math.max(0.3, lights.sun.intensity * (1 - stormIntensity * 0.6));
+      lights.fill.intensity = Math.max(0.1, lights.fill.intensity * (1 - stormIntensity * 0.5));
+
+      // Tint sky background toward murky brown-orange
+      scene.background.lerp(STORM_FOG_COLOR, stormIntensity * 0.4);
     },
     update(elapsed) {
       for (const animation of animated) {

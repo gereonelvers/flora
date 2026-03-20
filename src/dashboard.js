@@ -221,10 +221,48 @@ function appendStatusMsg(text) {
 }
 
 function renderChatMessagesInner() {
-  return chatMessages.filter(m => m.role === 'user' || m.role === 'agent').map(m => {
+  return chatMessages.filter(m => m.role === 'user' || m.role === 'agent' || m.role === 'escalation' || m.role === 'crew-alert').map(m => {
+    if (m.role === 'escalation') {
+      return renderEscalationCard(m.esc, m.escId);
+    }
+    if (m.role === 'crew-alert') {
+      const sevClass = m.severity === 'critical' ? 'crit' : 'warn';
+      return `<div class="d-msg d-msg-escalation" id="${m.alertId}">
+        <div class="d-escalation-card" style="border-color:var(--${sevClass})">
+          <div class="d-escalation-label" style="color:var(--${sevClass})">FLORA ALERT</div>
+          <button class="d-escalation-btn d-escalation-btn-a" id="${m.alertId}-view">View ${escapeHtml(m.tabLabel)}</button>
+        </div>
+      </div>`;
+    }
     const cls = m.role === 'user' ? 'd-msg-user' : 'd-msg-agent';
     return `<div class="d-msg ${cls}"><div class="d-msg-text">${md(m.text)}</div></div>`;
   }).join('');
+}
+
+function renderEscalationCard(esc, escId) {
+  // Check if already resolved
+  if (resolvedEscalations.has(escId)) {
+    const chosen = resolvedEscalations.get(escId);
+    return `<div class="d-msg d-msg-escalation" id="${escId}">
+      <div class="d-escalation-card d-escalation-resolved">
+        <div class="d-escalation-label">RESOLVED</div>
+        <div class="d-escalation-chosen">${escapeHtml(chosen)}</div>
+      </div>
+    </div>`;
+  }
+  const aRec = esc.option_a?.recommended;
+  const bRec = esc.option_b?.recommended;
+  const aLabel = escapeHtml(esc.option_a?.label || 'Option A') + (aRec ? ' (recommended)' : '');
+  const bLabel = escapeHtml(esc.option_b?.label || 'Option B') + (bRec ? ' (recommended)' : '');
+  const aClass = aRec ? 'd-escalation-btn-a' : 'd-escalation-btn-b';
+  const bClass = bRec ? 'd-escalation-btn-a' : 'd-escalation-btn-b';
+  return `<div class="d-msg d-msg-escalation" id="${escId}">
+    <div class="d-escalation-card">
+      <div class="d-escalation-label">CREW DECISION REQUIRED</div>
+      <button class="d-escalation-btn ${aClass}" id="${escId}-a">${aLabel}</button>
+      <button class="d-escalation-btn ${bClass}" id="${escId}-b">${bLabel}</button>
+    </div>
+  </div>`;
 }
 
 function renderStatusMessagesInner() {
@@ -419,6 +457,37 @@ function moduleAsciiMap(m) {
 
 function renderDetailPanel() {
   if (!activeTab) return '';
+
+  if (activeTab === 'events') {
+    const events = state.events || [];
+    const eventLog = (state.eventLog || []).slice(-10).reverse();
+    return `
+      <div class="detail-panel">
+        <div class="detail-header">
+          <span class="detail-title">Active Events</span>
+          <button class="detail-close" id="detail-close">&times;</button>
+        </div>
+        ${events.length > 0 ? `<div class="detail-list">
+          ${events.map(e => `<div class="detail-row" style="flex-direction:column;gap:4px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-weight:500;color:var(--crit)">${e.name}</span>
+              <span class="detail-row-label">${Math.max(0, e.sol_end - state.mission.currentSol)}d remaining</span>
+            </div>
+            <div class="detail-row-sub">${e.desc || ''}</div>
+            <div class="detail-row-sub">Severity: ${Math.round((e.severity || 0) * 100)}% · Sol ${e.sol_start}–${e.sol_end}</div>
+          </div>`).join('')}
+        </div>` : '<div class="detail-empty">No active events</div>'}
+        ${eventLog.length > 0 ? `
+          <div class="detail-section-title" style="margin-top:20px">Event History</div>
+          <div class="detail-list">
+            ${eventLog.map(e => `<div class="detail-row">
+              <span class="detail-row-label">Sol ${e.sol_start}</span>
+              <span>${e.name}</span>
+              <span class="detail-row-sub">${Math.round((e.severity || 0) * 100)}%</span>
+            </div>`).join('')}
+          </div>` : ''}
+      </div>`;
+  }
 
   if (activeTab === 'metrics') {
     const missionPct = Math.round((state.mission.currentSol / state.mission.totalSols) * 100);
@@ -685,6 +754,7 @@ function renderDetailPanel() {
     const renderMutCard = (m) => {
       const color = interpretColor(m.interpretation);
       const bg = interpretBg(m.interpretation);
+      const discardRec = m.interpretation === 'disruptive' || m.interpretation === 'suspicious';
       const refBase = m.ref || getRefBase(m.pos);
       const sw = getSequenceWindow(m.pos, 20);
 
@@ -745,6 +815,14 @@ function renderDetailPanel() {
             </div>
             ${probBars}
           ` : '<div class="dna-pending-badge">Awaiting Evo 2 scoring...</div>'}
+          <div class="dna-mut-actions">
+            ${discardRec
+              ? `<button class="d-escalation-btn d-escalation-btn-b dna-mut-keep" data-mut-id="${m.id}">Keep</button>
+                 <button class="d-escalation-btn d-escalation-btn-a dna-mut-discard" data-mut-id="${m.id}">Discard (recommended)</button>`
+              : `<button class="d-escalation-btn d-escalation-btn-a dna-mut-keep" data-mut-id="${m.id}">Keep (recommended)</button>
+                 <button class="d-escalation-btn d-escalation-btn-b dna-mut-discard" data-mut-id="${m.id}">Discard</button>`
+            }
+          </div>
         </div>`;
     };
 
@@ -880,6 +958,8 @@ function renderDetailPanel() {
 // ── Sol Advance + Proactive AI ───────────────────────────────────────
 let lastAnalysisSol = 0;
 let prevHarvestCount = 0;
+let prevEventCount = 0;
+let prevMutationCount = 0;
 
 let floraRunning = false; // prevent concurrent agent calls
 
@@ -932,12 +1012,12 @@ async function runFloraAutonomous() {
   floraRunning = true;
   setFloraState('thinking');
 
-  // Pause simulation while Flora thinks so sols don't advance during inference
-  // Write simSpeed=0 to server state so the 3D view (separate page) picks it up
+  // Slow to real-time while Flora thinks so sols don't race during inference
+  // Write simSpeed=1 to server state so the 3D view (separate page) picks it up
   const currentSpeed = state.mission.simSpeed || 1500;
-  if (currentSpeed > 0) {
+  if (currentSpeed > 1) {
     state.floraPausedSpeed = currentSpeed;
-    state.mission.simSpeed = 0;
+    state.mission.simSpeed = 1;
   }
   saveState(state);
 
@@ -958,7 +1038,22 @@ async function runFloraAutonomous() {
       appendStatusMsg(`**Sol ${state.mission.currentSol}:** ${brief}`);
     }
 
-    setFloraState('idle');
+    // Handle escalations from ask_user tool calls
+    if (result?.escalations?.length > 0) {
+      for (const esc of result.escalations) {
+        showEscalation(esc);
+      }
+    }
+
+    // Handle crew alerts from alert_crew tool calls
+    if (result?.crewAlerts?.length > 0) {
+      for (const alert of result.crewAlerts) {
+        showCrewAlert(alert);
+      }
+    }
+
+    const hasNotifications = (result?.escalations?.length > 0) || (result?.crewAlerts?.length > 0);
+    setFloraState(hasNotifications ? 'alert' : 'idle');
     render();
   } catch (err) {
     setFloraState('idle');
@@ -990,6 +1085,162 @@ function checkFloraLog() {
         }).join(', ');
         appendStatusMsg(`**Sol ${entry.sol}:** ${summary}`);
       }
+    }
+  }
+}
+
+// ── Escalation handling (ask_user tool) ──────────────────────────────
+let lastEscalationCount = 0;
+const shownEscalationIds = new Set(); // dedup across HTTP response + state polling
+const resolvedEscalations = new Map(); // escId → chosen label
+const activeEscalations = new Map(); // escId → esc object (for wiring buttons after render)
+
+function showEscalation(esc) {
+  const escId = esc.id || ('esc-' + Date.now());
+
+  // Dedup — don't show the same escalation twice (HTTP response + state polling)
+  if (shownEscalationIds.has(escId)) return;
+  shownEscalationIds.add(escId);
+
+  chatOpen = true;
+  setFloraState('alert');
+
+  // Store as chat messages — survives re-renders
+  chatMessages.push({ text: `**EMERGENCY — Sol ${state.mission.currentSol}**\n\n${esc.message}`, role: 'agent' });
+  chatMessages.push({ role: 'escalation', esc, escId });
+  if (chatMessages.length > 50) chatMessages = chatMessages.slice(-50);
+  activeEscalations.set(escId, esc);
+
+  // Update chat DOM + force panel open
+  const chatEl = document.getElementById('d-messages')?.querySelector('.d-chat-messages');
+  if (chatEl) chatEl.innerHTML = renderChatMessagesInner();
+  const panel = document.getElementById('flora-chat-panel');
+  if (panel) panel.classList.add('flora-chat-open');
+  const fab = document.getElementById('flora-fab');
+  if (fab) fab.classList.add('flora-fab-hidden');
+
+  wireEscalationButtons();
+
+  const msgsEl = document.getElementById('d-messages');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+// Wire click handlers for all active escalation buttons in the DOM
+function wireEscalationButtons() {
+  for (const [escId, esc] of activeEscalations) {
+    if (resolvedEscalations.has(escId)) continue;
+    const btnA = document.getElementById(`${escId}-a`);
+    const btnB = document.getElementById(`${escId}-b`);
+    if (btnA) btnA.onclick = () => applyEscalationChoice(escId, esc.option_a);
+    if (btnB) btnB.onclick = () => applyEscalationChoice(escId, esc.option_b);
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+function applyEscalationChoice(escId, chosen) {
+  if (chosen?.actions?.length > 0) {
+    state = applyActions(state, chosen.actions);
+  }
+  if (state.floraEscalations) {
+    state.floraEscalations = state.floraEscalations.filter(e => e.id !== escId);
+  }
+  saveState(state);
+
+  // Mark as resolved — renderEscalationCard will show the resolved state on next render
+  resolvedEscalations.set(escId, chosen?.label || 'Applied');
+
+  appendChatMsg(`Crew chose: **${chosen?.label || 'option'}**`, 'user');
+  setFloraState('idle');
+  render();
+}
+
+// Check for new escalations from server state (Lambda writes these directly)
+function checkFloraEscalations() {
+  const escalations = state.floraEscalations || [];
+  if (escalations.length > lastEscalationCount) {
+    const newOnes = escalations.slice(lastEscalationCount);
+    lastEscalationCount = escalations.length;
+    for (const esc of newOnes) {
+      showEscalation(esc);
+    }
+  }
+}
+
+// ── Crew Alert handling (alert_crew tool) ────────────────────────────
+let lastCrewAlertCount = 0;
+const shownCrewAlertIds = new Set();
+
+function showCrewAlert(alert) {
+  const alertId = alert.id || ('calert-' + Date.now());
+  if (shownCrewAlertIds.has(alertId)) return;
+  shownCrewAlertIds.add(alertId);
+
+  chatOpen = true;
+  setFloraState('alert');
+
+  const severity = alert.severity === 'critical' ? 'CRITICAL' : 'ALERT';
+  const tabLabels = { dna: 'DNA Analysis', events: 'Active Events', metrics: 'Mission Overview', crew: 'Crew Status' };
+  const tabLabel = tabLabels[alert.tab] || alert.tab;
+
+  // Store as chat messages — survives re-renders
+  chatMessages.push({ text: `**${severity} — Sol ${state.mission.currentSol}**\n\n${alert.message}`, role: 'agent' });
+  chatMessages.push({ role: 'crew-alert', alertId, tab: alert.tab, tabLabel });
+  if (chatMessages.length > 50) chatMessages = chatMessages.slice(-50);
+
+  const chatEl = document.getElementById('d-messages')?.querySelector('.d-chat-messages');
+  if (chatEl) chatEl.innerHTML = renderChatMessagesInner();
+  const panel = document.getElementById('flora-chat-panel');
+  if (panel) panel.classList.add('flora-chat-open');
+  const fab = document.getElementById('flora-fab');
+  if (fab) fab.classList.add('flora-fab-hidden');
+
+  wireCrewAlertButtons();
+
+  const msgsEl = document.getElementById('d-messages');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+
+  // Auto-trigger Evo2 scoring if this is a DNA alert
+  if (alert.tab === 'dna') {
+    const pendingMuts = (state.genetics?.mutations || []).filter(m => !m.scored);
+    if (pendingMuts.length > 0) {
+      scorePendingMutations(state).then(updated => {
+        if (JSON.stringify(updated.genetics) !== JSON.stringify(state.genetics)) {
+          state = updated;
+          saveState(state);
+          render();
+        }
+      }).catch(() => {});
+    }
+  }
+}
+
+function wireCrewAlertButtons() {
+  for (const msg of chatMessages) {
+    if (msg.role !== 'crew-alert') continue;
+    const btn = document.getElementById(`${msg.alertId}-view`);
+    if (btn) {
+      btn.onclick = () => {
+        activeTab = msg.tab;
+        render();
+        wireCrewAlertButtons();
+        wireEscalationButtons();
+      };
+    }
+  }
+}
+
+function checkFloraCrewAlerts() {
+  const alerts = state.floraCrewAlerts || [];
+  if (alerts.length > lastCrewAlertCount) {
+    const newOnes = alerts.slice(lastCrewAlertCount);
+    lastCrewAlertCount = alerts.length;
+    for (const alert of newOnes) {
+      showCrewAlert(alert);
     }
   }
 }
@@ -1199,9 +1450,9 @@ function render() {
           <div class="d-module-env">Evo 2 · GBSS gene · ${(state.genetics?.mutations || []).filter(m => !m.scored).length} pending</div>
         </div>
 
-        ${(state.events || []).length > 0 ? `<div class="d-sidebar-tab d-sidebar-alert">
+        ${(state.events || []).length > 0 ? `<div class="d-sidebar-tab d-sidebar-alert" data-tab="events">
           <div class="d-module-name">Active Events</div>
-          ${state.events.map(e => `<div class="d-alert">${e.name} (${e.sol_end - state.mission.currentSol}d left)</div>`).join('')}
+          ${state.events.map(e => `<div class="d-alert">${e.name}: ${e.desc || ''} (${Math.max(0, e.sol_end - state.mission.currentSol)}d left)</div>`).join('')}
         </div>` : ''}
 
         ${(state.agentActions || []).length > 0 ? `<div class="d-sidebar-tab ${activeTab === 'agent-log' ? 'active' : ''}" data-tab="agent-log">
@@ -1380,6 +1631,40 @@ function render() {
       }
     };
   }
+
+  // Wire mutation Keep/Discard buttons
+  document.querySelectorAll('.dna-mut-discard').forEach(btn => {
+    btn.onclick = () => {
+      const mutId = btn.dataset.mutId;
+      if (state.genetics?.mutations) {
+        state.genetics.mutations = state.genetics.mutations.filter(m => m.id !== mutId);
+      }
+      // Clear mutation-related alerts
+      if (state.alerts) {
+        state.alerts = state.alerts.filter(a => a.type !== 'dna_mutation');
+      }
+      if (state.floraCrewAlerts) {
+        state.floraCrewAlerts = state.floraCrewAlerts.filter(a => a.tab !== 'dna');
+      }
+      saveState(state);
+      render();
+    };
+  });
+  document.querySelectorAll('.dna-mut-keep').forEach(btn => {
+    btn.onclick = () => {
+      const mutId = btn.dataset.mutId;
+      // Mark as kept — hide buttons by removing from active list
+      const card = btn.closest('.dna-mut-card');
+      if (card) {
+        const actions = card.querySelector('.dna-mut-actions');
+        if (actions) actions.innerHTML = '<div class="dna-pending-badge" style="color:#15803d">Kept — monitoring</div>';
+      }
+    };
+  });
+
+  // Wire escalation + alert buttons after DOM rebuild
+  wireEscalationButtons();
+  wireCrewAlertButtons();
 }
 
 // ── Chat Handler ─────────────────────────────────────────────────────
@@ -1774,6 +2059,38 @@ html,body,#dashboard {
 .d-msg-text code { background:var(--border-light);padding:1px 5px;font-family:var(--mono);font-size:0.68rem; }
 .d-code { background:var(--bg);border:1px solid var(--border);padding:8px 10px;font-family:var(--mono);font-size:0.62rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word; }
 .d-msg-action .d-msg-text { background:transparent;border:1px solid var(--text);display:flex;align-items:center;justify-content:space-between;padding:8px 16px; }
+.d-msg-escalation { max-width:100%;align-self:stretch; }
+.d-escalation-card {
+  border:2px solid var(--crit);padding:16px 18px;
+  background:rgba(153,27,27,0.04);
+  display:flex;flex-direction:column;gap:10px;
+}
+.d-escalation-card.d-escalation-resolved {
+  border-color:var(--border);background:transparent;opacity:0.7;
+}
+.d-escalation-label {
+  font-family:var(--mono);font-size:0.52rem;font-weight:600;
+  text-transform:uppercase;letter-spacing:0.12em;color:var(--crit);
+}
+.d-escalation-resolved .d-escalation-label { color:var(--text3); }
+.d-escalation-chosen {
+  font-family:var(--mono);font-size:0.72rem;color:var(--text2);
+}
+.d-escalation-btn {
+  width:100%;padding:10px 16px;
+  font-family:var(--mono);font-size:0.68rem;font-weight:500;
+  letter-spacing:0.03em;cursor:pointer;
+  transition:background 0.15s,border-color 0.15s;
+  text-align:left;line-height:1.4;
+}
+.d-escalation-btn-a {
+  background:var(--text);color:var(--bg);border:1px solid var(--text);
+}
+.d-escalation-btn-a:hover { opacity:0.85; }
+.d-escalation-btn-b {
+  background:transparent;color:var(--text);border:1px solid var(--border);
+}
+.d-escalation-btn-b:hover { background:var(--border-light);border-color:var(--text); }
 .d-msg-error .d-msg-text { background:transparent;border:1px solid var(--crit);color:var(--crit);padding:10px 16px; }
 .d-msg-system .d-msg-text { background:transparent;border:none;color:var(--text3);font-family:var(--mono);font-size:0.58rem;text-align:center;padding:4px;letter-spacing:0.06em; }
 .d-msg-loading .d-msg-text { color:var(--text3);font-family:var(--mono); }
@@ -1819,8 +2136,7 @@ html,body,#dashboard {
 .dna-helix-col { flex-shrink:0;display:flex;flex-direction:column;align-items:center; }
 .dna-stats-col { flex:1;min-width:0;display:flex;flex-direction:column;gap:12px; }
 .dna-helix-wrap {
-  width:120px;height:220px;overflow:hidden;position:relative;
-  display:flex;flex-direction:column;justify-content:center;gap:2px;
+  width:120px;height:252px;overflow:hidden;position:relative;
 }
 .dna-helix { display:flex;flex-direction:column;gap:2px;animation:helix-scroll 6s linear infinite; }
 @keyframes helix-scroll {
@@ -1897,6 +2213,8 @@ html,body,#dashboard {
 .dna-seq-bad { color:#dc2626;background:rgba(220,38,38,0.1);border-radius:1px; }
 .dna-seq-ok { color:#15803d;background:rgba(21,128,61,0.1);border-radius:1px; }
 .dna-seq-del { font-weight:700;color:#dc2626;text-decoration:line-through;background:rgba(220,38,38,0.1);padding:0 2px; }
+.dna-mut-actions { display:flex;gap:6px;margin-top:10px; }
+.dna-mut-actions .d-escalation-btn { flex:1;padding:7px 12px;font-size:0.62rem;text-align:center; }
 
 /* Score details */
 .dna-score-detail {
@@ -2166,6 +2484,10 @@ document.head.appendChild(style);
     }
   }
   lastFloraLogLen = existingLog.length;
+  lastEscalationCount = (state.floraEscalations || []).length;
+  lastCrewAlertCount = (state.floraCrewAlerts || []).length;
+  prevEventCount = (state.events || []).length;
+  prevMutationCount = (state.genetics?.mutations || []).length;
 
   render();
 
@@ -2180,6 +2502,36 @@ document.head.appendChild(style);
     }
   }
 })();
+
+// ── Lightweight events sidebar patch (no full re-render) ────────────
+function patchEventsSidebar() {
+  const events = state.events || [];
+  const existing = document.querySelector('.d-sidebar-alert');
+  if (events.length === 0) {
+    if (existing) existing.remove();
+    return;
+  }
+  const html = `<div class="d-module-name">Active Events</div>
+    ${events.map(e => `<div class="d-alert">${e.name} (${Math.max(0, e.sol_end - state.mission.currentSol)}d left)</div>`).join('')}`;
+  if (existing) {
+    existing.innerHTML = html;
+  } else {
+    // Insert before the FLORA Actions tab or at end of sidebar
+    const sidebar = document.querySelector('.d-sidebar');
+    if (!sidebar) return;
+    const el = document.createElement('div');
+    el.className = 'd-sidebar-tab d-sidebar-alert';
+    el.dataset.tab = 'events';
+    el.innerHTML = html;
+    // Insert before the last sidebar child (footer) or append
+    const agentTab = sidebar.querySelector('[data-tab="agent-log"]');
+    if (agentTab) {
+      sidebar.insertBefore(el, agentTab);
+    } else {
+      sidebar.appendChild(el);
+    }
+  }
+}
 
 // Mars clock — interpolates from server state's solFraction + simSpeed + elapsed time
 setInterval(() => {
@@ -2223,7 +2575,7 @@ setInterval(async () => {
     window.__flora3d?.resetSolFraction?.();
   }
 
-  // Only full render on start/reset — otherwise just patch the lightweight elements
+  // Full render only on start/reset — otherwise patch DOM directly
   if (justStarted || justReset) {
     render();
   } else {
@@ -2232,23 +2584,37 @@ setInterval(async () => {
     if (solEl) solEl.textContent = `SOL ${state.mission.currentSol} / ${state.mission.totalSols} · ${state.mission.phase}`;
     const fillEl = document.querySelector('.d-topbar-fill');
     if (fillEl) fillEl.style.width = `${Math.round((state.mission.currentSol / state.mission.totalSols) * 100)}%`;
+
+    // Patch events sidebar without full re-render
+    patchEventsSidebar();
   }
 
   checkFloraLog();
+  checkFloraEscalations();
+  checkFloraCrewAlerts();
   updateFloraStatus();
 
-  // Check if FLORA should run after sol change
-  if (state.mission.started && saved.mission.currentSol > prevSol) {
-    const nextCheck = state.floraNextCheckSol || (lastAnalysisSol + 5);
-    const scheduledWake = state.mission.currentSol >= nextCheck;
-    const crewStarving = (state.crew?.members || []).some(m => m.alive && m.daysWithoutFood > 0);
-    const emptyOnline = state.modules.some(m =>
-      (!m.onlineSol || state.mission.currentSol >= m.onlineSol) && m.crops.length === 0
-    );
-    if (!floraRunning && (crewStarving || emptyOnline || scheduledWake)) {
-      lastAnalysisSol = state.mission.currentSol;
-      floraWakeReason = crewStarving ? 'crew food shortage' : emptyOnline ? 'empty modules online' : 'scheduled scan';
-      runFloraAutonomous();
+  // Check if FLORA should run after sol change, new events, or new mutations
+  if (state.mission.started) {
+    const solAdvanced = saved.mission.currentSol > prevSol;
+    const hasNewEvents = (state.events || []).length > prevEventCount;
+    prevEventCount = (state.events || []).length;
+    const mutCount = (state.genetics?.mutations || []).length;
+    const hasNewMutations = mutCount > prevMutationCount;
+    prevMutationCount = mutCount;
+
+    if (solAdvanced || hasNewEvents || hasNewMutations) {
+      const nextCheck = state.floraNextCheckSol || (lastAnalysisSol + 5);
+      const scheduledWake = solAdvanced && state.mission.currentSol >= nextCheck;
+      const crewStarving = (state.crew?.members || []).some(m => m.alive && m.daysWithoutFood > 0);
+      const emptyOnline = state.modules.some(m =>
+        (!m.onlineSol || state.mission.currentSol >= m.onlineSol) && m.crops.length === 0
+      );
+      if (!floraRunning && (hasNewEvents || hasNewMutations || crewStarving || emptyOnline || scheduledWake)) {
+        lastAnalysisSol = state.mission.currentSol;
+        floraWakeReason = hasNewMutations ? 'DNA mutation detected' : hasNewEvents ? 'new event detected' : crewStarving ? 'crew food shortage' : emptyOnline ? 'empty modules online' : 'scheduled scan';
+        runFloraAutonomous();
+      }
     }
   }
 }, 3000);
