@@ -932,6 +932,15 @@ async function runFloraAutonomous() {
   floraRunning = true;
   setFloraState('thinking');
 
+  // Pause simulation while Flora thinks so sols don't advance during inference
+  // Write simSpeed=0 to server state so the 3D view (separate page) picks it up
+  const currentSpeed = state.mission.simSpeed || 1500;
+  if (currentSpeed > 0) {
+    state.floraPausedSpeed = currentSpeed;
+    state.mission.simSpeed = 0;
+  }
+  saveState(state);
+
   try {
     const result = await runAutonomousScan(state);
 
@@ -954,6 +963,12 @@ async function runFloraAutonomous() {
   } catch (err) {
     setFloraState('idle');
   }
+
+  // Restore simulation speed via server state so all devices resume
+  const restoreSpeed = state.floraPausedSpeed || 1500;
+  delete state.floraPausedSpeed;
+  state.mission.simSpeed = restoreSpeed;
+  saveState(state);
 
   floraRunning = false;
   floraWakeReason = '';

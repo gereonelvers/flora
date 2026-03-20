@@ -77,20 +77,38 @@ async function writeToServer() {
   if (writeInProgress) return;
   writeInProgress = true;
   try {
-    // Read simSpeed from server (dashboard on another device may have changed it)
+    // Fetch the authoritative server state
     const res = await fetch(STATE_API);
-    if (res.ok) {
-      const serverState = await res.json();
-      if (serverState?.mission?.simSpeed != null) simSpeed = serverState.mission.simSpeed;
-    }
+    if (!res.ok) return;
+    const serverState = await res.json();
+    if (!serverState?.mission) return;
 
-    // Write LOCAL state (which has the correct currentSol) with updated time fields
+    // Sync simSpeed FROM server (dashboard/Flora may have changed it)
+    if (serverState.mission.simSpeed != null) simSpeed = serverState.mission.simSpeed;
+
+    // Show/hide Flora thinking notice
+    const paused = serverState.floraPausedSpeed != null && serverState.mission.simSpeed === 0;
+    const noticeEl = document.getElementById('flora-thinking-notice');
+    if (noticeEl) noticeEl.classList.toggle('hidden', !paused);
+
+    // Update ONLY time fields on the server state — never clobber other writers
+    serverState.mission.solFraction = solFraction;
+    serverState.mission.solFractionUpdatedAt = Date.now();
+
+    // Write the server state back (preserving floraPausedSpeed, floraLog, etc.)
+    await fetch(STATE_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(serverState),
+    });
+
+    // Keep local state in sync
     const s = window.__floraUI?.getState?.();
-    if (!s?.mission) return;
-    s.mission.simSpeed = simSpeed;
-    s.mission.solFraction = solFraction;
-    s.mission.solFractionUpdatedAt = Date.now();
-    window.__floraUI?.saveState?.(s);
+    if (s?.mission) {
+      s.mission.simSpeed = simSpeed;
+      s.mission.solFraction = solFraction;
+      s.mission.solFractionUpdatedAt = Date.now();
+    }
   } catch {} finally {
     writeInProgress = false;
   }
@@ -185,6 +203,41 @@ function showStartOverlay() { startOverlay.classList.remove('hidden'); }
 document.getElementById('start-3d-btn').onclick = () => {
   window.__flora3d.start();
 };
+
+// ── Flora thinking notice (shown on 3D view while sim is paused) ─────
+const floraNotice = document.createElement('div');
+floraNotice.id = 'flora-thinking-notice';
+floraNotice.className = 'hidden';
+floraNotice.innerHTML = `
+  <div class="flora-notice-dot"></div>
+  <span>FLORA is analyzing — simulation paused</span>
+`;
+root.appendChild(floraNotice);
+
+const floraNoticeStyle = document.createElement('style');
+floraNoticeStyle.textContent = `
+#flora-thinking-notice {
+  position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:150;
+  display:flex;align-items:center;gap:10px;
+  padding:10px 20px;
+  background:rgba(0,0,0,0.6);backdrop-filter:blur(12px);
+  border:1px solid rgba(34,197,94,0.35);border-radius:8px;
+  font-family:'DM Mono',monospace;font-size:0.7rem;
+  color:rgba(255,255,255,0.85);letter-spacing:0.06em;
+  transition:opacity 0.3s;
+}
+#flora-thinking-notice.hidden { opacity:0;pointer-events:none; }
+.flora-notice-dot {
+  width:8px;height:8px;border-radius:50%;
+  background:#22c55e;
+  animation:flora-dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes flora-dot-pulse {
+  0%,100% { opacity:1;box-shadow:0 0 6px #22c55e; }
+  50% { opacity:0.4;box-shadow:0 0 2px #22c55e; }
+}
+`;
+document.head.appendChild(floraNoticeStyle);
 
 // ── Poll server state every 500ms ────────────────────────────────────
 setInterval(readFromServer, 500);
